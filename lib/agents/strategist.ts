@@ -1,22 +1,31 @@
-// Phase 1: Strategist Agent — DeepSeek V4 Pro via OpenAI-compatible API
+// Phase 1: Strategist Agent — Llama 3.3 70B via Groq
 // Generates Brand Identity, Sitemap, and Product Doc, then self-reflects.
 
 import OpenAI from "openai";
 import { AgentState, BrandIdentity, SitemapPage } from "../types";
 
 const client = new OpenAI({
-  baseURL: "https://api.deepseek.com",
-  apiKey: process.env.DEEPSEEK_API_KEY!,
+  baseURL: "https://api.groq.com/openai/v1",
+  apiKey: process.env.GROQ_API_KEY!,
 });
 
-const MODEL = "deepseek-chat"; // DeepSeek V4 Pro
+const MODEL = "llama-3.3-70b-versatile";
 
-async function chat(messages: OpenAI.Chat.ChatCompletionMessageParam[], jsonMode = false) {
+async function chat(messages: OpenAI.Chat.ChatCompletionMessageParam[]): Promise<string> {
   const res = await client.chat.completions.create({
     model: MODEL,
     messages,
-    response_format: jsonMode ? { type: "json_object" } : { type: "text" },
     temperature: 0.7,
+  });
+  return res.choices[0].message.content ?? "";
+}
+
+async function chatJson(messages: OpenAI.Chat.ChatCompletionMessageParam[]): Promise<string> {
+  const res = await client.chat.completions.create({
+    model: MODEL,
+    messages,
+    temperature: 0.7,
+    response_format: { type: "json_object" },
   });
   return res.choices[0].message.content ?? "";
 }
@@ -28,22 +37,19 @@ export async function runStrategistAgent(
   emit("Strategist: analyzing idea and building brand identity...");
 
   // Step 1: Generate Brand Identity + Sitemap
-  const strategyRaw = await chat(
-    [
-      {
-        role: "system",
-        content: `You are a product strategist. Given a raw idea, return a JSON object with:
+  const strategyRaw = await chatJson([
+    {
+      role: "system",
+      content: `You are a product strategist. Given a raw idea, return a JSON object with:
 - brandIdentity: { name, tagline, colors: {primary, secondary, accent}, fonts: {heading, body}, tone, targetAudience }
 - sitemap: array of { slug, title, sections: string[] } (4-6 pages)
 Return only valid JSON.`,
-      },
-      {
-        role: "user",
-        content: `Raw idea: "${state.rawIdea}"`,
-      },
-    ],
-    true
-  );
+    },
+    {
+      role: "user",
+      content: `Raw idea: "${state.rawIdea}"`,
+    },
+  ]);
 
   const strategy = JSON.parse(strategyRaw) as {
     brandIdentity: BrandIdentity;
@@ -52,8 +58,8 @@ Return only valid JSON.`,
 
   emit("Strategist: brand identity created, running reflection loop...");
 
-  // Step 2: Reflection loop — agent reviews its own output
-  const reflectionRaw = await chat([
+  // Step 2: Reflection — agent reviews its own output
+  const reflectionRaw = await chatJson([
     {
       role: "system",
       content: `You are a critical product reviewer. Review this brand strategy and sitemap for logical flow, completeness, and market fit. Return a JSON object: { approved: boolean, improvements: string[] }`,
@@ -75,23 +81,20 @@ Return only valid JSON.`,
   let finalStrategy = strategy;
   if (!reflection.approved && reflection.improvements.length > 0) {
     emit(`Strategist: refining based on ${reflection.improvements.length} suggestions...`);
-    const refinedRaw = await chat(
-      [
-        {
-          role: "system",
-          content: `You are a product strategist. Refine the brand strategy based on the feedback. Return a JSON object with brandIdentity and sitemap keys. Return only valid JSON.`,
-        },
-        {
-          role: "user",
-          content: `Original: ${JSON.stringify(strategy)}\nImprovements: ${reflection.improvements.join(", ")}`,
-        },
-      ],
-      true
-    );
+    const refinedRaw = await chatJson([
+      {
+        role: "system",
+        content: `You are a product strategist. Refine the brand strategy based on feedback. Return a JSON object with brandIdentity and sitemap keys. Return only valid JSON.`,
+      },
+      {
+        role: "user",
+        content: `Original: ${JSON.stringify(strategy)}\nImprovements: ${reflection.improvements.join(", ")}`,
+      },
+    ]);
     finalStrategy = JSON.parse(refinedRaw);
   }
 
-  // Step 4: Generate 5-page Product Doc
+  // Step 4: Generate Product Doc
   emit("Strategist: generating product document...");
   const productDoc = await chat([
     {

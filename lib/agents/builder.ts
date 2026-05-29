@@ -5,7 +5,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AgentState } from "../types";
 
 const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genai.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
+const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const MAX_FIX_ATTEMPTS = 2;
 
@@ -57,8 +57,9 @@ async function validateCodeWithE2B(code: string): Promise<{ ok: boolean; error?:
   }
 
   try {
-    // Dynamic import so build doesn't fail without E2B installed
-    const { Sandbox } = await import("e2b" as string as any);
+    // eval-based require bypasses webpack static analysis so e2b doesn't need to be installed
+    // eslint-disable-next-line no-eval
+    const { Sandbox } = eval('require("e2b")') as { Sandbox: { create(o: unknown): Promise<{ files: { write(p: string, c: string): Promise<void> }; commands: { run(cmd: string): Promise<{ stdout: string; stderr: string }> }; kill(): Promise<void> }> } };
     const sandbox = await Sandbox.create({ apiKey: process.env.E2B_API_KEY, timeout: 30000 });
     await sandbox.files.write("/app/page.tsx", code);
     const result = await sandbox.commands.run(

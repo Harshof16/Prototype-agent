@@ -2,7 +2,7 @@
 // Manages shared AgentState and routes between phases.
 // Each node is a pure async function that receives state and returns a partial update.
 
-import { AgentState, StreamEvent } from "./types";
+import { AgentState, PhaseStatus, StreamEvent } from "./types";
 import { runStrategistAgent } from "./agents/strategist";
 import { runBuilderAgent } from "./agents/builder";
 import { runProducerAgent } from "./agents/producer";
@@ -54,9 +54,11 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     const strategyUpdate = await runStrategistAgent(state, log);
     state = { ...state, ...strategyUpdate };
     yield* flushQueue();
-    yield { type: "phase", phase: "strategy", status: "done", state: { brandIdentity: state.brandIdentity, sitemap: state.sitemap } };
+    // Emit brand draft immediately so UI can display it without waiting for later phases
+    yield { type: "phase", phase: "strategy", status: "done", state: { brandIdentity: state.brandIdentity, sitemap: state.sitemap, productDoc: state.productDoc } };
   } catch (e: unknown) {
     yield* flushQueue();
+    // Strategy is required — nothing to show without it
     yield { type: "error", message: `Strategy failed: ${(e as Error).message}` };
     return;
   }
@@ -65,10 +67,12 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
   state.phases.website = "running";
   yield { type: "phase", phase: "website", status: "running", message: "Building website..." };
 
+  let websiteFailed = false;
   try {
     const builderUpdate = await runBuilderAgent(state, log);
     state = { ...state, ...builderUpdate };
     yield* flushQueue();
+    // Stream website artifact immediately — don't wait for media/video
     yield {
       type: "artifact",
       artifact: { type: "website", url: "data:text/html;base64," + Buffer.from(state.websiteCode ?? "").toString("base64"), label: "Generated Website Code" },
@@ -76,26 +80,30 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     yield { type: "phase", phase: "website", status: "done" };
   } catch (e: unknown) {
     yield* flushQueue();
-    yield { type: "error", message: `Website build failed: ${(e as Error).message}` };
-    return;
+    websiteFailed = true;
+    yield { type: "phase", phase: "website", status: "error" as PhaseStatus };
+    yield { type: "log", message: `Website build failed: ${(e as Error).message}` };
   }
 
   // ── Phase 3: Media ───────────────────────────────────────────────────────
   state.phases.media = "running";
   yield { type: "phase", phase: "media", status: "running", message: "Generating media assets..." };
 
+  let mediaFailed = false;
   try {
     const producerUpdate = await runProducerAgent(state, log);
     state = { ...state, ...producerUpdate };
     yield* flushQueue();
     if (state.voiceoverUrl) {
+      // Emit voiceover immediately — don't wait for video stitching
       yield { type: "artifact", artifact: { type: "voiceover", url: state.voiceoverUrl, label: "Voiceover Audio" } };
     }
     yield { type: "phase", phase: "media", status: "done" };
   } catch (e: unknown) {
     yield* flushQueue();
-    yield { type: "error", message: `Media generation failed: ${(e as Error).message}` };
-    return;
+    mediaFailed = true;
+    yield { type: "phase", phase: "media", status: "error" as PhaseStatus };
+    yield { type: "log", message: `Media generation failed: ${(e as Error).message}` };
   }
 
   // ── Phase 4: Stitching ───────────────────────────────────────────────────
@@ -103,6 +111,7 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
   yield { type: "phase", phase: "stitching", status: "running", message: "Stitching final video..." };
 
   try {
+    if (mediaFailed) throw new Error("Skipped: media phase did not complete");
     const stitcherUpdate = await runStitcherAgent(state, log);
     state = { ...state, ...stitcherUpdate };
     yield* flushQueue();
@@ -112,9 +121,12 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     yield { type: "phase", phase: "stitching", status: "done" };
   } catch (e: unknown) {
     yield* flushQueue();
-    yield { type: "error", message: `Stitching failed: ${(e as Error).message}` };
-    return;
+    yield { type: "phase", phase: "stitching", status: "error" as PhaseStatus };
+    yield { type: "log", message: `Stitching failed: ${(e as Error).message}` };
   }
+
+  // Suppress unused variable warnings — these track whether we got partial results
+  void websiteFailed;
 
   yield {
     type: "done",

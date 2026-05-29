@@ -1,19 +1,19 @@
 // Phase 3: Producer Agent — Smallest.ai (voiceover) + Kling 3.0 (video clips)
-// DeepSeek writes the 30-second script, then triggers media APIs in parallel.
+// Llama 3.3 via Groq writes the 30-second script, then triggers media APIs in parallel.
 
 import OpenAI from "openai";
 import { AgentState } from "../types";
 
-const deepseek = new OpenAI({
-  baseURL: "https://api.deepseek.com",
-  apiKey: process.env.DEEPSEEK_API_KEY!,
+const groq = new OpenAI({
+  baseURL: "https://api.groq.com/openai/v1",
+  apiKey: process.env.GROQ_API_KEY!,
 });
 
 // ── Script generation ──────────────────────────────────────────────────────
 
 async function generateVideoScript(state: AgentState): Promise<string> {
-  const res = await deepseek.chat.completions.create({
-    model: "deepseek-chat",
+  const res = await groq.chat.completions.create({
+    model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
