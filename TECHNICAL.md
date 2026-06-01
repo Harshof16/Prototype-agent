@@ -10,15 +10,16 @@
 2. [Project Structure](#2-project-structure)
 3. [Shared State Schema](#3-shared-state-schema)
 4. [Streaming Protocol (SSE)](#4-streaming-protocol-sse)
-5. [Phase 1 — Strategist Agent](#5-phase-1--strategist-agent)
-6. [Phase 2 — Builder Agent](#6-phase-2--builder-agent)
-7. [Phase 3 — Producer Agent](#7-phase-3--producer-agent)
-8. [Phase 4 — Stitcher Agent](#8-phase-4--stitcher-agent)
-9. [Pipeline Orchestrator](#9-pipeline-orchestrator)
-10. [API Route](#10-api-route)
-11. [Frontend](#11-frontend)
-12. [Error Handling & Fallbacks](#12-error-handling--fallbacks)
-13. [Data Flow Diagram](#13-data-flow-diagram)
+5. [Idea Validator Agent](#5-idea-validator-agent)
+6. [Phase 1 — Strategist Agent](#6-phase-1--strategist-agent)
+7. [Phase 2 — Builder Agent](#7-phase-2--builder-agent)
+8. [Phase 3 — Producer Agent](#8-phase-3--producer-agent)
+9. [Phase 4 — Stitcher Agent](#9-phase-4--stitcher-agent)
+10. [Pipeline Orchestrator](#10-pipeline-orchestrator)
+11. [API Routes](#11-api-routes)
+12. [Frontend](#12-frontend)
+13. [Error Handling & Fallbacks](#13-error-handling--fallbacks)
+14. [Data Flow Diagram](#14-data-flow-diagram)
 
 ---
 
@@ -69,17 +70,20 @@ User Input (raw idea)
 ```
 prototype-agent/
 ├── app/
-│   ├── page.tsx                  # React UI — input, phase tracker, artifacts
+│   ├── page.tsx                  # React UI — validator, input, phase tracker, artifacts
 │   ├── layout.tsx                # Root layout
 │   ├── globals.css               # Tailwind base styles
 │   └── api/
-│       └── generate/
-│           └── route.ts          # POST endpoint — SSE stream
+│       ├── generate/
+│       │   └── route.ts          # POST /api/generate — SSE stream (main pipeline)
+│       └── validate/
+│           └── route.ts          # POST /api/validate — per-turn validator (JSON)
 ├── lib/
 │   ├── types.ts                  # AgentState, BrandIdentity, StreamEvent types
 │   ├── pipeline.ts               # Orchestrator — runs all 4 phases in sequence
 │   └── agents/
-│       ├── strategist.ts         # Phase 1: DeepSeek V4 Pro
+│       ├── validator.ts          # Idea Validator: Llama 3.3 70B via Groq
+│       ├── strategist.ts         # Phase 1: Llama 3.3 70B via Groq
 │       ├── builder.ts            # Phase 2: Gemini 2.5 Flash + E2B
 │       ├── producer.ts           # Phase 3: Smallest.ai + Kling 3.0
 │       └── stitcher.ts           # Phase 4: RunPod + FFmpeg
@@ -177,14 +181,120 @@ The frontend decodes the website artifact client-side and renders it in a sandbo
 
 ---
 
-## 5. Phase 1 — Strategist Agent
+## 5. Idea Validator Agent
+
+**File:** `lib/agents/validator.ts`  
+**API Route:** `app/api/validate/route.ts`  
+**Model:** Llama 3.3 70B (`llama-3.3-70b-versatile`) via Groq  
+**Temperature:** 0.65 (questions) / 0.40 (final report)
+
+### Purpose
+
+A pre-flight conversational agent that evaluates an idea across five dimensions before the user commits to a full pipeline run. It runs independently of the main 4-phase pipeline — invoked via a separate `POST /api/validate` endpoint.
+
+### Design: Stateless per-turn
+
+The validator is deliberately stateless on the server. Each HTTP request receives the full conversation history from the client and returns exactly one response — the next question or the final report. The browser owns and accumulates the history.
+
+```
+Client                          Server (POST /api/validate)
+  │                                    │
+  │── { idea, history: [] } ──────────►│ completedPairs=0 → generate Q1
+  │◄── { type:"question", content }────│
+  │                                    │
+  │── { idea, history: [Q1,A1] } ─────►│ completedPairs=1 → generate Q2
+  │◄── { type:"question", content }────│
+  │                                    │
+  │  ... (Q3, Q4, Q5 same pattern) ... │
+  │                                    │
+  │── { idea, history: [Q1-5,A1-5] } ─►│ completedPairs=5 → generate report
+  │◄── { type:"report", report:{...} }─│
+```
+
+`completedPairs = Math.floor(history.length / 2)` — since history alternates assistant/user, this tells the server exactly which question to ask next, or that all 5 are done.
+
+### LLM calls
+
+#### Questions (calls 1–5)
+
+One call per topic, with the accumulated history passed as context:
+
+| Index | Topic | System instruction focus |
+|---|---|---|
+| 0 | `market_size` | Target customer & addressable market |
+| 1 | `competition` | Real named competitors, alternatives |
+| 2 | `feasibility` | Hardest technical/operational challenge |
+| 3 | `uniqueness` | Genuine differentiation from incumbents |
+| 4 | `monetisation` | Primary revenue model and path to revenue |
+
+Each system prompt enforces: single question only, 1–2 sentences, concrete and specific, no preamble, do not answer the question.
+
+#### Report generation (call 6)
+
+After all 5 question-answer pairs are in history, the report system prompt requests a strict JSON object:
+
+```typescript
+interface ValidationReport {
+  verdict: "strong" | "promising" | "needs-work" | "risky";
+  summary: string;                  // 2-3 sentence assessment
+  strengths: string[];              // 3 items
+  risks: string[];                  // 3 items
+  suggestions: string[];            // 3 actionable items
+  scores: {
+    marketSize: number;             // 1-10
+    competition: number;            // 1-10, 10 = low competition = good
+    feasibility: number;            // 1-10
+    uniqueness: number;             // 1-10
+    monetisation: number;           // 1-10
+    overall: number;                // 1-10
+  };
+  competitorExamples: string[];     // 3 real named competitors
+  targetMarket: string;             // concise primary customer description
+  estimatedMarketSize: string;      // e.g. "$2.4B TAM, growing 18% YoY"
+}
+```
+
+Temperature 0.40 (lower than questions) — the report is analytical and should be consistent, not creative.
+
+### Client initialisation pattern
+
+The OpenAI client is constructed inside a `getClient()` function rather than at module scope. This prevents the constructor (which reads `process.env.GROQ_API_KEY`) from running during Next.js module evaluation — which would fire in the browser bundle where `process.env` is undefined.
+
+```typescript
+// Safe — only runs at request time inside the API route
+function getClient() {
+  return new OpenAI({
+    baseURL: "https://api.groq.com/openai/v1",
+    apiKey: process.env.GROQ_API_KEY!,
+  });
+}
+```
+
+The types (`ValidatorTurn`, `ValidationReport`, `ValidatorResponse`) are imported via `import type` in `page.tsx` — TypeScript erases type-only imports at compile time, so no runtime dependency on `validator.ts` exists in the browser bundle.
+
+### API route (`app/api/validate/route.ts`)
+
+```typescript
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;  // one LLM call per turn, 60s is ample
+
+POST /api/validate
+  Body: { idea: string, history: ValidatorTurn[] }
+  Response: ValidatorResponse (JSON)
+```
+
+Returns `{ type: "question", content, questionIndex, totalQuestions }` for turns 1–5, or `{ type: "report", report }` for turn 6.
+
+---
+
+## 6. Phase 1 — Strategist Agent
 
 **File:** `lib/agents/strategist.ts`  
-**Model:** DeepSeek V4 Pro (`deepseek-chat`) via OpenAI-compatible API  
-**Base URL:** `https://api.deepseek.com`  
+**Model:** Llama 3.3 70B (`llama-3.3-70b-versatile`) via Groq  
+**Base URL:** `https://api.groq.com/openai/v1`  
 **Temperature:** 0.7
 
-### LLM calls (3 total)
+### LLM calls (3–4 total)
 
 #### Call 1 — Strategy Generation (JSON mode)
 Generates the brand identity and sitemap in a single structured JSON response.
@@ -243,7 +353,7 @@ User:   Brand: <brandIdentity JSON>
 
 ---
 
-## 6. Phase 2 — Builder Agent
+## 7. Phase 2 — Builder Agent
 
 **File:** `lib/agents/builder.ts`  
 **Model:** Gemini 2.5 Flash (`gemini-2.5-flash-preview-05-20`)  
@@ -305,12 +415,12 @@ When key is absent, falls back to regex:
 
 ---
 
-## 7. Phase 3 — Producer Agent
+## 8. Phase 3 — Producer Agent
 
 **File:** `lib/agents/producer.ts`  
-**Models:** DeepSeek V4 Pro (script) + Smallest.ai Waves (TTS) + Kling 3.0 (video)
+**Models:** Llama 3.3 70B via Groq (script) + Smallest.ai Waves (TTS) + Kling 3.0 (video)
 
-### Sub-step 1 — Script Generation (DeepSeek)
+### Sub-step 1 — Script Generation (Llama 3.3 70B via Groq)
 
 ```
 System: You are a video scriptwriter. Write a punchy 30-second product demo script
@@ -372,7 +482,7 @@ Success when `status === "succeed"` → extracts `works[0].resource.resource` as
 
 ---
 
-## 8. Phase 4 — Stitcher Agent
+## 9. Phase 4 — Stitcher Agent
 
 **File:** `lib/agents/stitcher.ts`  
 **Compute:** RunPod Serverless (GPU spot instance)  
@@ -424,7 +534,7 @@ Returns `videoClips[0]` directly as `finalVideoUrl` without rendering — pipeli
 
 ---
 
-## 9. Pipeline Orchestrator
+## 10. Pipeline Orchestrator
 
 **File:** `lib/pipeline.ts`  
 **Pattern:** `async function*` (AsyncGenerator)
@@ -488,7 +598,9 @@ Any uncaught exception in a phase yields `{ type: "error" }` and `return`s — s
 
 ---
 
-## 10. API Route
+## 11. API Routes
+
+### `/api/generate` — Main pipeline SSE stream
 
 **File:** `app/api/generate/route.ts`  
 **Method:** POST  
@@ -534,7 +646,25 @@ const stream = new ReadableStream({
 
 ---
 
-## 11. Frontend
+### `/api/validate` — Idea Validator (per-turn JSON)
+
+**File:** `app/api/validate/route.ts`  
+**Method:** POST  
+**Path:** `/api/validate`
+
+```typescript
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+```
+
+**Request:** `{ idea: string, history: ValidatorTurn[] }`  
+**Response:** `ValidatorResponse` — either `{ type: "question", ... }` or `{ type: "report", ... }`
+
+The route calls `runValidatorTurn(idea, history)` and returns the result as JSON. No streaming — each turn is a synchronous round-trip. Total of 6 calls per full validation (5 questions + 1 report).
+
+---
+
+## 12. Frontend
 
 **File:** `app/page.tsx`  
 **Framework:** React (Next.js App Router, client component)
@@ -550,8 +680,29 @@ const stream = new ReadableStream({
 | `websiteCode` | `string` | Decoded TSX, rendered in iframe |
 | `running` | `boolean` | Disables input during pipeline |
 | `done` / `error` | `boolean` / `string` | Terminal state banners |
+| `validating` | `boolean` | Shows/hides the Idea Validator panel |
+| `validatorKey` | `number` | Incremented to reset the validator on re-open |
 
-### SSE consumption
+### Idea Validator UI flow
+
+```
+User clicks "Validate"
+  → setValidating(true), setValidatorKey(k+1)
+  → <IdeaValidator key={validatorKey} idea={idea} ... /> mounts
+  → useEffect fires → sendTurn([])  (first call, empty history)
+  → server returns Q1
+  → user types answer → sendTurn([Q1, A1])
+  → server returns Q2
+  ... (5 rounds)
+  → server returns { type: "report", report }
+  → <ValidationReportCard> displayed
+  → user clicks "Looks good — Generate full kit →"
+  → setValidating(false); startGenerate()
+```
+
+`IdeaValidator` is a self-contained component that manages its own `history`, `currentInput`, `loading`, and `report` state. It calls `POST /api/validate` on each turn and accumulates the conversation. The parent (`Home`) only sees the final intent: proceed or close.
+
+### SSE consumption (generate pipeline)
 
 Reads the stream via `ReadableStream.getReader()`. Splits on `\n\n` boundary, parses `data: ` prefix, routes each event type:
 
@@ -572,11 +723,12 @@ The website artifact arrives as `data:text/html;base64,...`. The UI:
 
 ---
 
-## 12. Error Handling & Fallbacks
+## 13. Error Handling & Fallbacks
 
 | Condition | Behaviour |
 |-----------|-----------|
-| `DEEPSEEK_API_KEY` missing | Throws on first LLM call — pipeline fails at Phase 1 |
+| `GROQ_API_KEY` missing (validator) | 500 from `/api/validate` — UI shows retry option |
+| `GROQ_API_KEY` missing (pipeline) | Throws on first LLM call — pipeline fails at Phase 1 |
 | `GEMINI_API_KEY` missing | Throws on first website gen call — pipeline fails at Phase 2 |
 | `E2B_API_KEY` missing | Falls back to regex validation — pipeline continues |
 | `SMALLEST_AI_API_KEY` missing | Returns `https://placeholder.audio/voiceover.mp3` — pipeline continues |
@@ -587,13 +739,35 @@ The website artifact arrives as `data:text/html;base64,...`. The UI:
 | Kling polling timeout (3 min) | Throws — caught by pipeline, emits error event |
 | RunPod polling timeout (5 min) | Throws — caught by pipeline, emits error event |
 | JSON.parse failure on reflection | Defaults to `{ approved: true, improvements: [] }` — skips refinement |
+| Validator JSON.parse failure on report | Throws — caught by route, returns 500 — UI shows retry link |
+| User closes validator mid-conversation | `setValidating(false)` — history discarded, no side effects |
 
 ---
 
-## 13. Data Flow Diagram
+## 14. Data Flow Diagram
 
 ```
 User types idea
+      │
+      ├──────────────────────────────────────────────┐
+      │  (optional)                                  │
+      ▼                                              ▼
+Click "Validate"                             Click "Generate"
+      │                                              │
+      ▼                                              │
+─────────────────────────────────────────────────────────────
+IDEA VALIDATOR  (Llama 3.3 70B via Groq — 6 round-trips)
+─────────────────────────────────────────────────────────────
+      │
+      ├─► POST /api/validate { idea, history:[] } → Q1 (market size)
+      ├─► POST /api/validate { idea, history:[Q1,A1] } → Q2 (competition)
+      ├─► POST /api/validate { idea, history:[Q1-2,A1-2] } → Q3 (feasibility)
+      ├─► POST /api/validate { idea, history:[Q1-3,A1-3] } → Q4 (uniqueness)
+      ├─► POST /api/validate { idea, history:[Q1-4,A1-4] } → Q5 (monetisation)
+      └─► POST /api/validate { idea, history:[Q1-5,A1-5] } → Report JSON
+      │
+      │   UI displays: ValidationReportCard (scores, verdict, strengths, risks)
+      │   User clicks "Looks good — Generate full kit →"
       │
       ▼
 POST /api/generate
@@ -605,7 +779,7 @@ createInitialState(rawIdea)
       │
       ▼
 ─────────────────────────────────────────────────────
-PHASE 1: STRATEGIST (DeepSeek V4 Pro)
+PHASE 1: STRATEGIST (Llama 3.3 70B via Groq)
 ─────────────────────────────────────────────────────
       │
       ├─► [LLM Call 1] rawIdea → brandIdentity + sitemap (JSON)
@@ -636,10 +810,10 @@ PHASE 2: BUILDER (Gemini 2.5 Flash + E2B)
       │
       ▼
 ─────────────────────────────────────────────────────
-PHASE 3: PRODUCER (DeepSeek + Smallest.ai + Kling)
+PHASE 3: PRODUCER (Llama 3.3 70B + Smallest.ai + Kling)
 ─────────────────────────────────────────────────────
       │
-      ├─► [DeepSeek] brandIdentity + productDoc → videoScript (75 words)
+      ├─► [Llama 3.3 70B] brandIdentity + productDoc → videoScript (75 words)
       │
       ├─► [Smallest.ai] videoScript → voiceoverUrl (MP3)
       │

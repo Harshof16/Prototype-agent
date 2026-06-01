@@ -59,6 +59,8 @@ The result: **most ideas never get prototyped.** Not because they aren't good, b
 
 Total cost per run: **~$0.30.**
 
+Before committing to a full run, founders can use the built-in **Idea Validator** — a structured AI conversation that stress-tests the idea across market size, competition, feasibility, uniqueness, and monetisation, then produces a scored report with verdict, competitor analysis, risks, and actionable suggestions. The validator adds less than $0.001 per use and takes 2–3 minutes to complete.
+
 The key insight is not just that AI can do each of these tasks individually — tools for that already exist. The insight is that **a single shared brand identity drives all three outputs simultaneously.** The same brand name, color palette, tone, target audience, and messaging thread runs through the document, the website, and the video. No coordination required. No consistency gaps.
 
 This is the difference between three AI tools and one AI agent.
@@ -94,6 +96,20 @@ Pitching a new concept to a client. A working website preview and a video produc
 
 ## 4. What It Produces
 
+### Pre-run — Idea Validation (Optional)
+
+A structured 5-question AI conversation that evaluates the idea before any assets are built:
+
+- **Market Size** — who is the primary customer and how large is the addressable market?
+- **Competition** — what existing tools, products, or behaviours does this displace?
+- **Feasibility** — what is the hardest part to build or operate?
+- **Uniqueness** — what makes this genuinely different from what's already out there?
+- **Monetisation** — how does this make money, and what is the primary revenue model?
+
+The validator produces a scored report (each dimension rated 1–10), a `strong / promising / needs-work / risky` verdict, a list of real named competitors, three strengths, three risks, and three actionable suggestions. From the report, a single click proceeds to the full pipeline.
+
+---
+
 ### Output 1 — Product Document (Markdown / PDF)
 A structured 5-section document written by an AI strategist that has reflected on the idea and refined it:
 
@@ -128,10 +144,25 @@ A 30-second produced video ready for a pitch deck, a tweet, or a product hunt la
 
 ## 5. How It Works — Business View
 
-The agent runs as 4 sequential stages. Each stage feeds its output into the next — nothing is repeated, nothing is inconsistent.
+The workflow begins with an optional idea validation step, then runs 4 sequential production stages. Each stage feeds its output into the next — nothing is repeated, nothing is inconsistent.
 
 ```
 Your idea (one sentence)
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  STAGE 0: VALIDATE  (~2–3 minutes, optional)                │
+│  AI advisor asks 5 focused questions:                       │
+│    1. Who is your customer and how big is the market?       │
+│    2. Who are the real competitors? (names them)            │
+│    3. What's the hardest thing to build?                    │
+│    4. What makes this genuinely different?                  │
+│    5. How does this make money?                             │
+│                                                             │
+│  Output: scored report — verdict, scores 1-10, strengths,  │
+│          risks, suggestions, competitor list                │
+│  → "Looks good — Generate full kit" proceeds to Stage 1    │
+└─────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -276,8 +307,9 @@ Every existing tool is a single-output tool. You get a website, or a video, or a
 2. Build a brand identity first and use it to drive all outputs
 3. Produce all three asset types in a single run
 4. Self-review and refine their own outputs before delivering
+5. Validate the idea with a structured adversarial conversation before generating anything
 
-The closest workflow today is: use ChatGPT to write a brief → paste it into Framer → paste the script into HeyGen → combine manually. That takes hours, costs more, and produces inconsistent results.
+The closest workflow today is: use ChatGPT to validate → write a brief → paste it into Framer → paste the script into HeyGen → combine manually. That takes hours, costs more, and produces inconsistent results. Prototype Agent collapses all five steps into a single product.
 
 ### Moat
 
@@ -347,25 +379,33 @@ Currently each run is stateless — the agent has no knowledge of previous runs 
 
 ## 11. Roadmap
 
-### Week 1 — Foundation (current)
-- [x] DeepSeek strategy agent with reflection loop
+### Week 1 — Foundation (complete)
+- [x] Strategy agent with reflection loop (Llama 3.3 70B via Groq)
 - [x] Product document generation
 - [x] SSE streaming pipeline
 - [x] Live progress UI
 
-### Week 2 — Website
+### Week 2 — Website (complete)
 - [x] Gemini Flash landing page generation
 - [x] E2B sandbox code validation with auto-fix
 - [x] Iframe preview in browser
 
-### Week 3 — Media
+### Week 3 — Media (complete)
 - [x] Video script generation
 - [x] Smallest.ai voiceover integration
 - [x] Kling 3.0 video clip generation (parallel)
 
-### Week 4 — Automation
+### Week 4 — Automation (complete)
 - [x] RunPod FFmpeg stitch with lower-thirds
 - [x] Full one-click pipeline: idea → PDF + URL + video
+
+### Week 5 — Idea Validator (complete)
+- [x] 5-question structured validation conversation
+- [x] Scored report with verdict, competitors, strengths, risks, suggestions
+- [x] One-click proceed from validation to full pipeline
+- [x] Stateless per-turn API design (`POST /api/validate`)
+
+### In progress
 - [ ] PDF export of product document
 - [ ] Hosted website URL (Vercel deploy via API)
 - [ ] Email delivery of outputs
@@ -379,6 +419,7 @@ Currently each run is stateless — the agent has no knowledge of previous runs 
 - [ ] Slack / Notion integration for team sharing
 - [ ] Fine-tuning on user's existing brand guidelines
 - [ ] Multi-language output
+- [ ] Validation history — save past reports to compare iterations
 
 ---
 
@@ -388,9 +429,10 @@ Currently each run is stateless — the agent has no knowledge of previous runs 
 |-----------|--------|
 | **Core value** | Collapse 6 weeks and $5,000–$22,000 of prototype work into 2 minutes and $0.30 |
 | **Primary output** | Product doc + landing page + intro video, brand-consistent across all three |
+| **Built-in validator** | 5-question AI evaluation with scored report before committing to a full run |
 | **Primary user** | Founders, PMs, venture studios who need to validate ideas fast |
-| **Cost per run** | ~$0.30 (full pipeline) / ~$0.004 (doc + website only) |
+| **Cost per run** | ~$0.30 (full pipeline) / ~$0.004 (doc + website only) / ~$0.001 (validation only) |
 | **Monthly fixed cost** | $10–$30 (Kling subscription + hosting) |
 | **Gross margin at $9 retail** | ~97% variable margin, ~65% contribution margin |
 | **Key risk** | Output is prototype-grade, not production-grade — manages expectations |
-| **Key moat** | Shared brand state across all outputs — not replicated by any single-output AI tool |
+| **Key moat** | Shared brand state across all outputs + built-in validation — not replicated by any single-output AI tool |

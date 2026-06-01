@@ -80,7 +80,9 @@ export async function runStitcherAgent(
   const { videoClips, voiceoverUrl, brandIdentity } = state;
 
   if (!videoClips?.length || !voiceoverUrl || !brandIdentity) {
-    return { phases: { ...state.phases, stitching: "error" }, error: "Missing media assets for stitching" };
+    const missing = [!videoClips?.length && "video clips", !voiceoverUrl && "voiceover", !brandIdentity && "brand identity"].filter(Boolean).join(", ");
+    emit(`Stitcher: skipping — missing ${missing}.`);
+    return { phases: { ...state.phases, stitching: "error" }, error: `Missing media assets for stitching: ${missing}` };
   }
 
   if (!process.env.RUNPOD_API_KEY || !process.env.RUNPOD_ENDPOINT_ID) {

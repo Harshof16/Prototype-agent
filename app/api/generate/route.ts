@@ -1,10 +1,19 @@
 import { NextRequest } from "next/server";
+import { auth } from "@/auth";
 import { runPipeline } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes for full pipeline
 
 export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const { idea } = await req.json();
 
   if (!idea || typeof idea !== "string" || idea.trim().length < 5) {

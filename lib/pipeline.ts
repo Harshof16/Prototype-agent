@@ -35,9 +35,11 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
   // We buffer events and flush them as the generator advances
   const eventQueue: StreamEvent[] = [];
 
+  let currentPhase: keyof AgentState["phases"] = "strategy";
+
   function log(message: string) {
     emit(message);
-    eventQueue.push({ type: "log", message });
+    eventQueue.push({ type: "log", phase: currentPhase, message });
   }
 
   async function* flushQueue(): AsyncGenerator<StreamEvent> {
@@ -47,6 +49,7 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
   }
 
   // ── Phase 1: Strategy ────────────────────────────────────────────────────
+  currentPhase = "strategy";
   state.phases.strategy = "running";
   yield { type: "phase", phase: "strategy", status: "running", message: "Starting strategy phase..." };
 
@@ -64,6 +67,7 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
   }
 
   // ── Phase 2: Website ─────────────────────────────────────────────────────
+  currentPhase = "website";
   state.phases.website = "running";
   yield { type: "phase", phase: "website", status: "running", message: "Building website..." };
 
@@ -82,10 +86,11 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     yield* flushQueue();
     websiteFailed = true;
     yield { type: "phase", phase: "website", status: "error" as PhaseStatus };
-    yield { type: "log", message: `Website build failed: ${(e as Error).message}` };
+    yield { type: "log", phase: "website", message: `Website build failed: ${(e as Error).message}` };
   }
 
   // ── Phase 3: Media ───────────────────────────────────────────────────────
+  currentPhase = "media";
   state.phases.media = "running";
   yield { type: "phase", phase: "media", status: "running", message: "Generating media assets..." };
 
@@ -94,19 +99,25 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     const producerUpdate = await runProducerAgent(state, log);
     state = { ...state, ...producerUpdate };
     yield* flushQueue();
+    if (state.videoScript) {
+      yield { type: "artifact", artifact: { type: "script", url: "data:text/plain;charset=utf-8," + encodeURIComponent(state.videoScript), label: "Video Script" } };
+    }
     if (state.voiceoverUrl) {
       // Emit voiceover immediately — don't wait for video stitching
       yield { type: "artifact", artifact: { type: "voiceover", url: state.voiceoverUrl, label: "Voiceover Audio" } };
     }
-    yield { type: "phase", phase: "media", status: "done" };
+    const noClips = !state.videoClips?.length;
+    if (noClips) mediaFailed = true;
+    yield { type: "phase", phase: "media", status: noClips ? "error" as PhaseStatus : "done" };
   } catch (e: unknown) {
     yield* flushQueue();
     mediaFailed = true;
     yield { type: "phase", phase: "media", status: "error" as PhaseStatus };
-    yield { type: "log", message: `Media generation failed: ${(e as Error).message}` };
+    yield { type: "log", phase: "media", message: `Media generation failed: ${(e as Error).message}` };
   }
 
   // ── Phase 4: Stitching ───────────────────────────────────────────────────
+  currentPhase = "stitching";
   state.phases.stitching = "running";
   yield { type: "phase", phase: "stitching", status: "running", message: "Stitching final video..." };
 
@@ -118,11 +129,17 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     if (state.finalVideoUrl) {
       yield { type: "artifact", artifact: { type: "video", url: state.finalVideoUrl, label: "Final Video" } };
     }
-    yield { type: "phase", phase: "stitching", status: "done" };
+    yield { type: "phase", phase: "stitching", status: state.finalVideoUrl ? "done" : "error" as PhaseStatus };
   } catch (e: unknown) {
     yield* flushQueue();
     yield { type: "phase", phase: "stitching", status: "error" as PhaseStatus };
-    yield { type: "log", message: `Stitching failed: ${(e as Error).message}` };
+    yield { type: "log", phase: "stitching", message: `Stitching failed: ${(e as Error).message}` };
+    // Emit raw clips so the user can download them even though stitching failed
+    if (state.videoClips?.length) {
+      for (let i = 0; i < state.videoClips.length; i++) {
+        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label: `Video Clip ${i + 1}` } };
+      }
+    }
   }
 
   // Suppress unused variable warnings — these track whether we got partial results

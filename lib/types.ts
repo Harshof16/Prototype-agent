@@ -59,7 +59,7 @@ export interface StreamEvent {
   status?: PhaseStatus;
   message?: string;
   artifact?: {
-    type: "website" | "video" | "pdf" | "voiceover";
+    type: "website" | "video" | "pdf" | "voiceover" | "script";
     url: string;
     label: string;
   };

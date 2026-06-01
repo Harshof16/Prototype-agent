@@ -30,6 +30,18 @@ async function chatJson(messages: OpenAI.Chat.ChatCompletionMessageParam[]): Pro
   return res.choices[0].message.content ?? "";
 }
 
+function stringify(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (typeof val === "object" && val !== null) return Object.values(val).join(", ");
+  return String(val ?? "");
+}
+
+function normalizeBrandIdentity(b: BrandIdentity) {
+  if (!b) return;
+  b.tone = stringify(b.tone);
+  b.targetAudience = stringify(b.targetAudience);
+}
+
 export async function runStrategistAgent(
   state: AgentState,
   emit: (msg: string) => void
@@ -42,6 +54,7 @@ export async function runStrategistAgent(
       role: "system",
       content: `You are a product strategist. Given a raw idea, return a JSON object with:
 - brandIdentity: { name, tagline, colors: {primary, secondary, accent}, fonts: {heading, body}, tone, targetAudience }
+  IMPORTANT: tone and targetAudience must be plain strings, not objects or arrays.
 - sitemap: array of { slug, title, sections: string[] } (4-6 pages)
 Return only valid JSON.`,
     },
@@ -55,6 +68,7 @@ Return only valid JSON.`,
     brandIdentity: BrandIdentity;
     sitemap: SitemapPage[];
   };
+  normalizeBrandIdentity(strategy.brandIdentity);
 
   emit("Strategist: brand identity created, running reflection loop...");
 
@@ -92,6 +106,7 @@ Return only valid JSON.`,
       },
     ]);
     finalStrategy = JSON.parse(refinedRaw);
+    normalizeBrandIdentity(finalStrategy.brandIdentity);
   }
 
   // Step 4: Generate Product Doc

@@ -17,8 +17,8 @@ async function generateVideoScript(state: AgentState): Promise<string> {
     messages: [
       {
         role: "system",
-        content: `You are a video scriptwriter. Write a punchy 30-second product demo script (approx 75 words).
-Format as plain text with natural pauses indicated by "..." — no stage directions, no scene headings.`,
+        content: `You are a video scriptwriter. Write a punchy 15-second product demo script (approx 30 words, strictly under 280 characters total).
+Format as plain text with natural pauses indicated by "..." — no stage directions, no scene headings. Output ONLY the script text, nothing else.`,
       },
       {
         role: "user",
@@ -37,27 +37,38 @@ async function generateVoiceover(script: string): Promise<string> {
     return "https://placeholder.audio/voiceover.mp3";
   }
 
-  const res = await fetch("https://waves.smallest.ai/api/v1/tts", {
+  const res = await fetch("https://waves-api.smallest.ai/api/v1/lightning/get_speech", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.SMALLEST_AI_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      text: script,
-      voice_id: "en_male_professional",
-      output_format: "mp3",
+      text: script.length > 280 ? script.slice(0, 280).replace(/\s\S*$/, "") : script,
+      voice_id: "emily",
+      sample_rate: 24000,
       speed: 1.0,
+      add_wav_header: true,
     }),
   });
 
   if (!res.ok) {
-    throw new Error(`Smallest.ai TTS failed: ${res.status} ${await res.text()}`);
+    const errText = await res.text();
+    throw new Error(`Smallest.ai TTS failed: ${res.status} ${errText}`);
   }
 
-  const data = await res.json();
-  // API returns { audio_url: string } or { url: string }
-  return data.audio_url ?? data.url;
+  const contentType = res.headers.get("content-type") ?? "";
+
+  // JSON response: extract URL field
+  if (contentType.includes("application/json")) {
+    const data = await res.json();
+    return data.audio_url ?? data.url;
+  }
+
+  // Lightning endpoint returns raw audio bytes — encode as data URI for the stitcher
+  const audioBuffer = await res.arrayBuffer();
+  const audioBase64 = Buffer.from(audioBuffer).toString("base64");
+  return `data:audio/wav;base64,${audioBase64}`;
 }
 
 // ── Video clips: Kling 3.0 API ────────────────────────────────────────────
@@ -123,22 +134,48 @@ export async function runProducerAgent(
   emit("Producer: writing 30-second video script...");
   const videoScript = await generateVideoScript(state);
 
+  emit(`Producer: script ready — "${videoScript}"`);
   emit("Producer: generating voiceover with Smallest.ai...");
-  const voiceoverUrl = await generateVoiceover(videoScript);
+  let voiceoverUrl: string | undefined;
+  try {
+    voiceoverUrl = await generateVoiceover(videoScript);
+    emit("Producer: voiceover generated.");
+  } catch (e: unknown) {
+    emit(`Producer: voiceover failed — ${(e as Error).message}`);
+  }
 
   emit("Producer: generating video clips with Kling 3.0 (this takes ~2 minutes)...");
   const clipPrompts = buildClipPrompts(state);
 
-  // Generate all clips in parallel
-  const videoClips = await Promise.all(
-    clipPrompts.map((prompt, i) => generateVideoClip(prompt, i).catch(() => `https://placeholder.video/clip${i}.mp4`))
+  // Generate all clips in parallel; collect results and surface per-clip failures
+  const clipResults = await Promise.allSettled(
+    clipPrompts.map((prompt, i) => generateVideoClip(prompt, i))
   );
 
-  emit("Producer: done.");
+  const videoClips: string[] = [];
+  for (let i = 0; i < clipResults.length; i++) {
+    const result = clipResults[i];
+    if (result.status === "fulfilled") {
+      videoClips.push(result.value);
+    } else {
+      emit(`Producer: clip ${i + 1} failed — ${result.reason?.message ?? result.reason}`);
+    }
+  }
+
+  if (!voiceoverUrl && videoClips.length === 0) {
+    throw new Error("Both voiceover and all Kling video clips failed — no media generated");
+  }
+
+  const clipsOk = videoClips.length > 0;
+  if (!clipsOk) {
+    emit("Producer: no video clips — stitching will be skipped.");
+  }
+
+  emit(`Producer: done (voiceover: ${voiceoverUrl ? "ok" : "failed"}, clips: ${videoClips.length}/${clipPrompts.length}).`);
   return {
     videoScript,
     voiceoverUrl,
     videoClips,
-    phases: { ...state.phases, media: "done" },
+    phases: { ...state.phases, media: clipsOk ? "done" : "error" },
   };
 }

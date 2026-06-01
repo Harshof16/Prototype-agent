@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef, useMemo } from "react";
+import NextImage from "next/image";
 import { useSession, signIn, signOut } from "next-auth/react";
 import type { StreamEvent, AgentState, PhaseStatus } from "@/lib/types";
+import type { ValidatorTurn, ValidationReport } from "@/lib/agents/validator";
+
+const TOTAL_QUESTIONS = 5;
 
 // ── Sub-components ────────────────────────────────────────────────────────
 
@@ -10,12 +14,10 @@ function PhaseIndicator({
   label,
   status,
   icon,
-  step,
 }: {
   label: string;
   status: PhaseStatus;
   icon: string;
-  step: number;
 }) {
   const config: Record<PhaseStatus, { border: string; glow: string; dot: string; text: string; bg: string }> = {
     pending: {
@@ -79,6 +81,7 @@ function ArtifactCard({
     video: "🎬",
     pdf: "📄",
     voiceover: "🎙️",
+    script: "📝",
   };
 
   const colors: Record<string, string> = {
@@ -86,16 +89,46 @@ function ArtifactCard({
     video: "from-violet-600/20 to-purple-600/10 border-violet-500/30 hover:border-violet-400/60",
     pdf: "from-amber-600/20 to-orange-600/10 border-amber-500/30 hover:border-amber-400/60",
     voiceover: "from-pink-600/20 to-rose-600/10 border-pink-500/30 hover:border-pink-400/60",
+    script: "from-teal-600/20 to-cyan-600/10 border-teal-500/30 hover:border-teal-400/60",
   };
 
   const cls = colors[artifact.type] ?? "from-zinc-600/20 to-zinc-700/10 border-zinc-500/30 hover:border-zinc-400/60";
+  const isAudio = artifact.url.startsWith("data:audio/") || artifact.type === "voiceover";
+
+  if (artifact.type === "script") {
+    const text = decodeURIComponent(artifact.url.replace("data:text/plain;charset=utf-8,", ""));
+    return (
+      <div className={`flex flex-col gap-2 px-4 py-3 rounded-xl border bg-linear-to-r backdrop-blur-sm ${cls}`}>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">{icons.script}</span>
+          <p className="text-sm font-semibold text-white">{artifact.label}</p>
+        </div>
+        <p className="text-xs text-zinc-300 leading-relaxed font-mono whitespace-pre-wrap border-t border-white/8 pt-2">{text}</p>
+      </div>
+    );
+  }
+
+  if (isAudio) {
+    return (
+      <div className={`flex flex-col gap-3 px-4 py-3 rounded-xl border bg-linear-to-r backdrop-blur-sm ${cls}`}>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">{icons[artifact.type] ?? "📦"}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white">{artifact.label}</p>
+            <p className="text-xs text-zinc-500 truncate mt-0.5">{artifact.url.slice(0, 55)}…</p>
+          </div>
+        </div>
+        <audio controls src={artifact.url} className="w-full h-10 accent-pink-500" />
+      </div>
+    );
+  }
 
   return (
     <a
       href={artifact.url}
       target="_blank"
       rel="noopener noreferrer"
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl border bg-gradient-to-r backdrop-blur-sm transition-all duration-300 group ${cls}`}
+      className={`flex items-center gap-3 px-4 py-3 rounded-xl border bg-linear-to-r backdrop-blur-sm transition-all duration-300 group ${cls}`}
     >
       <span className="text-2xl">{icons[artifact.type] ?? "📦"}</span>
       <div className="flex-1 min-w-0">
@@ -105,6 +138,12 @@ function ArtifactCard({
       <span className="text-zinc-500 group-hover:text-white text-sm transition-colors">↗</span>
     </a>
   );
+}
+
+function toStr(val: unknown): string {
+  if (typeof val === "string") return val;
+  if (typeof val === "object" && val !== null) return Object.values(val).join(", ");
+  return String(val ?? "");
 }
 
 function BrandCard({ brand }: { brand: AgentState["brandIdentity"] }) {
@@ -123,10 +162,10 @@ function BrandCard({ brand }: { brand: AgentState["brandIdentity"] }) {
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
         <span className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400">
-          Tone: <span className="text-zinc-200">{brand.tone}</span>
+          Tone: <span className="text-zinc-200">{toStr(brand.tone)}</span>
         </span>
         <span className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-zinc-400">
-          Audience: <span className="text-zinc-200">{brand.targetAudience}</span>
+          Audience: <span className="text-zinc-200">{toStr(brand.targetAudience)}</span>
         </span>
       </div>
       <div className="flex gap-2 flex-wrap">
@@ -272,15 +311,25 @@ function ProductDocCard({ doc, brandName }: { doc: string; brandName?: string })
 }
 
 function buildPreviewHtml(code: string): string {
-  // Remove TS-only constructs that @babel/standalone typescript preset can't handle at runtime
+  // Detect the exported component name before stripping the export keyword
+  const exportMatch = code.match(/export\s+default\s+(?:function\s+)?(\w+)/);
+  const componentName = exportMatch?.[1] ?? "LandingPage";
+
+  // Collect named react imports so we can re-inject them as globals
+  const reactImports: string[] = [];
+  code.replace(/^import\s+\{([^}]*)\}\s+from\s+['"]react['"];?\s*$/gm, (_, names: string) => {
+    names.split(",").map((n: string) => n.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean).forEach((n: string) => reactImports.push(n));
+    return "";
+  });
+  const reactGlobals = reactImports.length
+    ? `const { ${[...new Set(reactImports)].join(", ")} } = React;`
+    : "";
+
   const cleaned = code
-    // Remove "import type" lines
+    .replace(/^['"]use client['"];?\s*$/gm, "")
     .replace(/^import type\s.+$/gm, "")
-    // Remove "import ... from 'next/...'" — no Next.js in iframe
-    .replace(/^import\s.+from\s['"]next\/.+['"];?\s*$/gm, "")
-    // Remove "import React" — React is global via UMD
-    .replace(/^import\s+React.*from\s+['"]react['"];?\s*$/gm, "")
-    // Remove "export default" — we call LandingPage directly
+    .replace(/^import\s.+from\s['"]next(?:\/.+)?['"];?\s*$/gm, "")
+    .replace(/^import\s.*from\s+['"]react['"];?\s*$/gm, "")
     .replace(/export\s+default\s+/, "");
 
   return `<!DOCTYPE html>
@@ -288,19 +337,35 @@ function buildPreviewHtml(code: string): string {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{margin:0}</style>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" data-presets="react,typescript">
+  <div id="error" style="display:none;padding:16px;background:#fee;color:#c00;font:13px monospace;white-space:pre-wrap"></div>
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      var el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = (err ? err.stack : msg) || msg;
+    };
+  </script>
+  <script type="text/babel" data-presets="react,typescript" data-plugins="transform-modules-umd">
+${reactGlobals}
 ${cleaned}
 
-const domRoot = document.getElementById('root');
-const reactRoot = ReactDOM.createRoot(domRoot);
-reactRoot.render(React.createElement(LandingPage));
+try {
+  const domRoot = document.getElementById('root');
+  const reactRoot = ReactDOM.createRoot(domRoot);
+  reactRoot.render(React.createElement(${componentName}));
+} catch(e) {
+  const el = document.getElementById('error');
+  el.style.display = 'block';
+  el.textContent = e.stack || e.message;
+}
   </script>
 </body>
 </html>`;
@@ -308,7 +373,16 @@ reactRoot.render(React.createElement(LandingPage));
 
 function WebsitePreview({ code }: { code: string }) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
-  const html = buildPreviewHtml(code);
+
+  const blobUrl = useMemo(() => {
+    const html = buildPreviewHtml(code);
+    const blob = new Blob([html], { type: "text/html" });
+    return URL.createObjectURL(blob);
+  }, [code]);
+
+  useEffect(() => {
+    return () => URL.revokeObjectURL(blobUrl);
+  }, [blobUrl]);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden backdrop-blur-sm">
@@ -337,12 +411,18 @@ function WebsitePreview({ code }: { code: string }) {
         </div>
       </div>
       {tab === "preview" ? (
-        <iframe
-          srcDoc={html}
-          className="w-full h-[600px] bg-white"
-          sandbox="allow-scripts"
-          title="Generated website preview"
-        />
+        blobUrl ? (
+          <iframe
+            src={blobUrl}
+            className="w-full h-[600px] bg-white"
+            sandbox="allow-scripts"
+            title="Generated website preview"
+          />
+        ) : (
+          <div className="w-full h-[600px] bg-white flex items-center justify-center text-zinc-400 text-sm">
+            Loading preview…
+          </div>
+        )
       ) : (
         <pre className="p-4 text-xs text-zinc-400 overflow-auto max-h-[600px] scrollbar-thin scrollbar-thumb-white/10 leading-relaxed">
           {code}
@@ -352,9 +432,9 @@ function WebsitePreview({ code }: { code: string }) {
   );
 }
 
-// ── Auth bar ──────────────────────────────────────────────────────────────
+// ── Auth button (floating) ────────────────────────────────────────────────
 
-function UserBar() {
+function AuthButton() {
   const { data: session, status } = useSession();
 
   if (status === "loading") {
@@ -372,7 +452,7 @@ function UserBar() {
           onClick={() => signIn("google")}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-zinc-900 font-semibold text-sm hover:bg-zinc-100 transition-colors shadow-lg"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
@@ -387,10 +467,12 @@ function UserBar() {
   return (
     <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
       {session.user?.image && (
-        <img
+        <NextImage
           src={session.user.image}
           alt={session.user.name ?? "User avatar"}
-          className="w-8 h-8 rounded-full border border-white/20"
+          width={32}
+          height={32}
+          className="rounded-full border border-white/20"
         />
       )}
       <span className="text-zinc-300 text-sm hidden sm:block">{session.user?.name}</span>
@@ -404,21 +486,324 @@ function UserBar() {
   );
 }
 
-// ── Decorative background orbs ─────────────────────────────────────────────
+// ── Idea Validator ────────────────────────────────────────────────────────
+
+const SCORE_LABELS: Record<string, string> = {
+  marketSize: "Market Size",
+  competition: "Low Competition",
+  feasibility: "Feasibility",
+  uniqueness: "Uniqueness",
+  monetisation: "Monetisation",
+  overall: "Overall",
+};
+
+const VERDICT_CONFIG = {
+  strong:       { label: "Strong Idea",    bg: "bg-emerald-950/40", border: "border-emerald-500/40", text: "text-emerald-300", dot: "bg-emerald-400" },
+  promising:    { label: "Promising",       bg: "bg-blue-950/40",    border: "border-blue-500/40",    text: "text-blue-300",    dot: "bg-blue-400" },
+  "needs-work": { label: "Needs Work",      bg: "bg-amber-950/40",   border: "border-amber-500/40",   text: "text-amber-300",   dot: "bg-amber-400" },
+  risky:        { label: "High Risk",       bg: "bg-red-950/40",     border: "border-red-500/40",     text: "text-red-300",     dot: "bg-red-400" },
+};
+
+function ScoreBadge({ value, label }: { value: number; label: string }) {
+  const pct = (value / 10) * 100;
+  const color =
+    value >= 8 ? "bg-emerald-500" :
+    value >= 6 ? "bg-blue-500" :
+    value >= 4 ? "bg-amber-500" :
+    "bg-red-500";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-zinc-400">{label}</span>
+        <span className="text-zinc-200 font-semibold">{value}/10</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/8 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ValidationReportCard({ report, onProceed }: { report: ValidationReport; onProceed: () => void }) {
+  const vc = VERDICT_CONFIG[report.verdict] ?? VERDICT_CONFIG["promising"];
+
+  return (
+    <div className={`rounded-2xl border ${vc.border} ${vc.bg} backdrop-blur-sm p-6 space-y-5`}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${vc.dot}`} />
+          <span className={`text-sm font-bold uppercase tracking-wider ${vc.text}`}>{vc.label}</span>
+        </div>
+        <span className="text-xs text-zinc-600 font-mono">Validation Report</span>
+      </div>
+
+      {/* Summary */}
+      <p className="text-sm text-zinc-300 leading-relaxed">{report.summary}</p>
+
+      {/* Market info */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-white/4 border border-white/8 px-3 py-2">
+          <p className="text-[10px] text-zinc-600 uppercase tracking-widest mb-0.5">Target Market</p>
+          <p className="text-xs text-zinc-200">{report.targetMarket}</p>
+        </div>
+        <div className="rounded-lg bg-white/4 border border-white/8 px-3 py-2">
+          <p className="text-[10px] text-zinc-600 uppercase tracking-widest mb-0.5">Market Size</p>
+          <p className="text-xs text-zinc-200">{report.estimatedMarketSize}</p>
+        </div>
+      </div>
+
+      {/* Scores */}
+      <div className="space-y-2.5">
+        <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest">Evaluation Scores</p>
+        {Object.entries(report.scores).map(([k, v]) => (
+          <ScoreBadge key={k} value={v as number} label={SCORE_LABELS[k] ?? k} />
+        ))}
+      </div>
+
+      {/* Competitors */}
+      {report.competitorExamples?.length > 0 && (
+        <div>
+          <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest mb-2">Competitors</p>
+          <div className="flex flex-wrap gap-1.5">
+            {report.competitorExamples.map((c) => (
+              <span key={c} className="text-xs px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400">{c}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Strengths / Risks / Suggestions */}
+      <div className="grid md:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-mono text-emerald-600 uppercase tracking-widest">Strengths</p>
+          {report.strengths.map((s, i) => (
+            <p key={i} className="text-xs text-zinc-400 flex gap-1.5"><span className="text-emerald-600 shrink-0">+</span>{s}</p>
+          ))}
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-mono text-red-600 uppercase tracking-widest">Risks</p>
+          {report.risks.map((r, i) => (
+            <p key={i} className="text-xs text-zinc-400 flex gap-1.5"><span className="text-red-600 shrink-0">!</span>{r}</p>
+          ))}
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-mono text-blue-500 uppercase tracking-widest">Suggestions</p>
+          {report.suggestions.map((s, i) => (
+            <p key={i} className="text-xs text-zinc-400 flex gap-1.5"><span className="text-blue-500 shrink-0">→</span>{s}</p>
+          ))}
+        </div>
+      </div>
+
+      {/* CTA */}
+      <button
+        onClick={onProceed}
+        className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 text-white font-semibold text-sm transition-all duration-200 shadow-[0_0_20px_rgba(139,92,246,0.4)] flex items-center justify-center gap-2"
+      >
+        Looks good — Generate full kit
+        <span className="text-violet-300">→</span>
+      </button>
+    </div>
+  );
+}
+
+interface IdeaValidatorProps {
+  idea: string;
+  onProceed: () => void;
+  onClose: () => void;
+}
+
+function IdeaValidator({ idea, onProceed, onClose }: IdeaValidatorProps) {
+  const [history, setHistory] = useState<ValidatorTurn[]>([]);
+  const [currentInput, setCurrentInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [questionIndex, setQuestionIndex] = useState(-1);
+  const [report, setReport] = useState<ValidationReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  // Kick off the first question on mount
+  useEffect(() => {
+    sendTurn([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+    if (!loading && !report) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [history, loading, report, scrollToBottom]);
+
+  async function sendTurn(hist: ValidatorTurn[]) {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea, history: hist }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+
+      if (data.type === "question") {
+        setQuestionIndex(data.questionIndex);
+        setHistory((prev) => [...prev, { role: "assistant", content: data.content }]);
+      } else if (data.type === "report") {
+        setReport(data.report);
+      }
+    } catch (e: unknown) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAnswer(e: React.FormEvent) {
+    e.preventDefault();
+    const answer = currentInput.trim();
+    if (!answer || loading) return;
+
+    const newHistory: ValidatorTurn[] = [...history, { role: "user", content: answer }];
+    setHistory(newHistory);
+    setCurrentInput("");
+    await sendTurn(newHistory);
+  }
+
+  const progressPct = report ? 100 : Math.round(((questionIndex + 1) / TOTAL_QUESTIONS) * 100);
+
+  return (
+    <div className="rounded-2xl border border-violet-500/30 bg-[#0d0d1a] backdrop-blur-sm overflow-hidden shadow-[0_0_40px_rgba(139,92,246,0.15)]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8 bg-violet-950/20">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+            <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">Idea Validator</span>
+          </div>
+          {!report && (
+            <span className="text-[10px] text-zinc-600 font-mono">
+              Question {Math.min(questionIndex + 1, TOTAL_QUESTIONS)} of {TOTAL_QUESTIONS}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none"
+          aria-label="Close validator"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-0.5 bg-white/5">
+        <div
+          className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-500 transition-all duration-700"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
+
+      {/* Chat area */}
+      <div className="p-5 space-y-4 max-h-[520px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+        {/* Intro */}
+        <div className="flex gap-3 items-start">
+          <div className="w-7 h-7 rounded-full bg-violet-600/30 border border-violet-500/30 flex items-center justify-center text-sm shrink-0">🔍</div>
+          <div className="flex-1">
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              I&apos;ll evaluate <span className="text-violet-300 font-medium">&ldquo;{idea}&rdquo;</span> across five dimensions — market size, competition, feasibility, uniqueness, and monetisation — then give you a scored validation report.
+            </p>
+          </div>
+        </div>
+
+        {/* Conversation */}
+        {history.map((turn, i) => (
+          <div key={i} className={`flex gap-3 items-start ${turn.role === "user" ? "flex-row-reverse" : ""}`}>
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 ${
+              turn.role === "assistant"
+                ? "bg-violet-600/30 border border-violet-500/30"
+                : "bg-white/8 border border-white/15"
+            }`}>
+              {turn.role === "assistant" ? "🤖" : "💬"}
+            </div>
+            <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+              turn.role === "assistant"
+                ? "bg-white/5 border border-white/8 text-zinc-200 rounded-tl-sm"
+                : "bg-violet-600/20 border border-violet-500/25 text-violet-100 rounded-tr-sm"
+            }`}>
+              {turn.content}
+            </div>
+          </div>
+        ))}
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex gap-3 items-start">
+            <div className="w-7 h-7 rounded-full bg-violet-600/30 border border-violet-500/30 flex items-center justify-center text-sm shrink-0">🤖</div>
+            <div className="px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-white/5 border border-white/8 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-xs text-red-300">
+            {error} — <button onClick={() => sendTurn(history)} className="underline">retry</button>
+          </div>
+        )}
+
+        {/* Report */}
+        {report && <ValidationReportCard report={report} onProceed={onProceed} />}
+
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* Input */}
+      {!report && (
+        <div className="px-5 pb-5">
+          <form onSubmit={handleAnswer} className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={currentInput}
+              onChange={(e) => setCurrentInput(e.target.value)}
+              placeholder={loading ? "Thinking…" : "Your answer…"}
+              disabled={loading || history.length === 0}
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500/50 disabled:opacity-50 transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={loading || !currentInput.trim() || history.length === 0}
+              className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold text-sm transition-colors"
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Background ─────────────────────────────────────────────────────────────
 
 function BackgroundOrbs() {
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
-      {/* Top-left violet orb */}
-      <div className="absolute -top-48 -left-48 w-[600px] h-[600px] rounded-full bg-violet-600/15 blur-[120px]" />
-      {/* Top-right blue orb */}
-      <div className="absolute -top-24 right-0 w-[500px] h-[500px] rounded-full bg-blue-600/10 blur-[120px]" />
-      {/* Bottom-center indigo orb */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-indigo-700/10 blur-[120px]" />
-      {/* Mid right faint pink */}
-      <div className="absolute top-1/2 -right-32 w-[400px] h-[400px] rounded-full bg-fuchsia-700/8 blur-[100px]" />
-
-      {/* Grid overlay */}
+      <div className="absolute -top-48 -left-48 w-150 h-150 rounded-full bg-violet-600/15 blur-[120px]" />
+      <div className="absolute -top-24 right-0 w-125 h-125 rounded-full bg-blue-600/10 blur-[120px]" />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-175 h-100 rounded-full bg-indigo-700/10 blur-[120px]" />
+      <div className="absolute top-1/2 -right-32 w-100 h-100 rounded-full bg-fuchsia-700/8 blur-[100px]" />
       <div
         className="absolute inset-0 opacity-[0.04]"
         style={{
@@ -429,32 +814,367 @@ function BackgroundOrbs() {
           backgroundSize: "60px 60px",
         }}
       />
-
-      {/* Subtle noise texture via radial gradient dots */}
-      <div
-        className="absolute inset-0 opacity-[0.015]"
-        style={{
-          backgroundImage: "radial-gradient(circle, white 1px, transparent 1px)",
-          backgroundSize: "24px 24px",
-        }}
-      />
     </div>
   );
 }
 
-// ── Hero section ───────────────────────────────────────────────────────────
+// ── Landing page sections (shown only before first run) ────────────────────
 
-function HeroSection({
-  idea,
-  setIdea,
-  running,
-  onSubmit,
-}: {
+const STEPS = [
+  {
+    number: "01",
+    icon: "🔍",
+    title: "Validate your idea",
+    body: "Click Validate. An AI advisor asks 5 sharp questions — market size, competition, feasibility, uniqueness, monetisation — then scores your idea and flags the risks.",
+    color: "from-amber-500/20 to-amber-600/5",
+    border: "border-amber-500/20",
+    accent: "text-amber-400",
+  },
+  {
+    number: "02",
+    icon: "🧠",
+    title: "Watch it build",
+    body: "One click proceeds to the full pipeline. Live logs stream as four AI agents work — strategy, landing page code, voiceover, and video — all sharing one brand identity.",
+    color: "from-violet-500/20 to-violet-600/5",
+    border: "border-violet-500/20",
+    accent: "text-violet-400",
+  },
+  {
+    number: "03",
+    icon: "🚀",
+    title: "Download your kit",
+    body: "Get a validation report, product doc (PDF/DOCX), a fully coded React landing page, a voiceover MP3, and a 30-second promo video.",
+    color: "from-emerald-500/20 to-emerald-600/5",
+    border: "border-emerald-500/20",
+    accent: "text-emerald-400",
+  },
+];
+
+const OUTPUTS = [
+  {
+    icon: "🔍",
+    label: "Validation Report",
+    desc: "Scored assessment across market size, competition, feasibility, uniqueness, and monetisation — with a verdict, real competitor names, risks, and actionable suggestions.",
+    tag: "Pre-flight",
+    tagColor: "bg-amber-500/15 text-amber-300 border-amber-500/20",
+  },
+  {
+    icon: "📄",
+    label: "Product Document",
+    desc: "5-section strategic brief — problem, solution, audience, roadmap, and go-to-market. Exported as PDF & DOCX.",
+    tag: "Strategy",
+    tagColor: "bg-violet-500/15 text-violet-300 border-violet-500/20",
+  },
+  {
+    icon: "🌐",
+    label: "Landing Page",
+    desc: "Mobile-responsive React + Tailwind site built to your brand palette. Preview in-browser and copy the source.",
+    tag: "Code",
+    tagColor: "bg-blue-500/15 text-blue-300 border-blue-500/20",
+  },
+  {
+    icon: "🎙️",
+    label: "Voiceover",
+    desc: "Professional broadcast-quality narration generated from your script. Ready for ads, demos, or social.",
+    tag: "Audio",
+    tagColor: "bg-pink-500/15 text-pink-300 border-pink-500/20",
+  },
+  {
+    icon: "🎬",
+    label: "Promo Video",
+    desc: "30-second branded intro — four cinematic AI clips stitched with lower-thirds and your voiceover baked in.",
+    tag: "Video",
+    tagColor: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/20",
+  },
+];
+
+const EXAMPLE_IDEAS = [
+  "A habit tracker that uses AI to adapt to your psychology",
+  "Marketplace connecting local chefs with remote dinner parties",
+  "B2B tool that turns Slack threads into Jira tickets automatically",
+  "An app that gamifies learning a new language with daily micro-challenges",
+];
+
+const STATS = [
+  { value: "~2 min", label: "Average run time" },
+  { value: "$0.30", label: "Cost per full kit" },
+  { value: "5", label: "AI agents in the pipeline" },
+  { value: "4+", label: "Deliverables per run" },
+];
+
+function LandingContent({ onIdeaSelect }: { onIdeaSelect: (idea: string) => void }) {
+  return (
+    <>
+      {/* Stats strip */}
+      <div className="w-full border-y border-white/6 bg-white/2 backdrop-blur-sm">
+        <div className="max-w-5xl mx-auto px-4 py-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+          {STATS.map((s) => (
+            <div key={s.label} className="text-center">
+              <p className="text-2xl font-black text-white">{s.value}</p>
+              <p className="text-xs text-zinc-500 mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* How it works */}
+      <section className="max-w-5xl mx-auto px-4 pt-16 pb-10">
+        <div className="text-center mb-10">
+          <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">How it works</p>
+          <h2 className="text-2xl md:text-3xl font-bold text-white">Validate, build, and ship — in three steps</h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-4">
+          {STEPS.map((step) => (
+            <div
+              key={step.number}
+              className={`relative rounded-2xl border ${step.border} bg-linear-to-b ${step.color} backdrop-blur-sm p-6`}
+            >
+              <div className="flex items-start gap-3 mb-4">
+                <span className={`text-xs font-mono font-bold ${step.accent} opacity-60`}>{step.number}</span>
+                <span className="text-2xl leading-none">{step.icon}</span>
+              </div>
+              <h3 className="text-white font-semibold mb-2">{step.title}</h3>
+              <p className="text-zinc-400 text-sm leading-relaxed">{step.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* What you get */}
+      <section className="max-w-5xl mx-auto px-4 pt-4 pb-10">
+        <div className="text-center mb-10">
+          <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">What you get</p>
+          <h2 className="text-2xl md:text-3xl font-bold text-white">Validate first, then ship four production assets</h2>
+        </div>
+        {/* Validation report — full-width featured card */}
+        <div className="mb-4">
+          <div className="group rounded-2xl border border-amber-500/25 bg-gradient-to-r from-amber-500/10 to-amber-600/5 backdrop-blur-sm p-6 hover:border-amber-500/40 hover:bg-amber-500/10 transition-all duration-300">
+            <div className="flex items-start justify-between mb-3">
+              <span className="text-3xl leading-none">{OUTPUTS[0].icon}</span>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${OUTPUTS[0].tagColor}`}>{OUTPUTS[0].tag}</span>
+            </div>
+            <h3 className="text-white font-semibold mb-1.5">{OUTPUTS[0].label}</h3>
+            <p className="text-zinc-400 text-sm leading-relaxed">{OUTPUTS[0].desc}</p>
+          </div>
+        </div>
+        {/* Remaining four outputs — 2-col grid */}
+        <div className="grid md:grid-cols-2 gap-4">
+          {OUTPUTS.slice(1).map((o) => (
+            <div
+              key={o.label}
+              className="group rounded-2xl border border-white/8 bg-white/3 backdrop-blur-sm p-6 hover:border-white/15 hover:bg-white/5 transition-all duration-300"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <span className="text-3xl leading-none">{o.icon}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${o.tagColor}`}>{o.tag}</span>
+              </div>
+              <h3 className="text-white font-semibold mb-1.5">{o.label}</h3>
+              <p className="text-zinc-400 text-sm leading-relaxed">{o.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Example ideas */}
+      <section className="max-w-5xl mx-auto px-4 pb-16">
+        <p className="text-xs font-mono text-zinc-600 uppercase tracking-widest mb-4 text-center">Try one of these</p>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {EXAMPLE_IDEAS.map((idea) => (
+            <button
+              key={idea}
+              onClick={() => onIdeaSelect(idea)}
+              className="group text-left px-4 py-3 rounded-xl border border-white/8 bg-white/3 hover:border-violet-500/40 hover:bg-violet-950/20 transition-all duration-200 text-sm text-zinc-400 hover:text-zinc-200"
+            >
+              <span className="text-zinc-700 group-hover:text-violet-500 mr-2 transition-colors">→</span>
+              {idea}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section className="max-w-5xl mx-auto px-4 pt-4 pb-16">
+        <div className="text-center mb-10">
+          <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Pricing</p>
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">Simple, transparent pricing</h2>
+          <p className="text-zinc-500 text-sm max-w-lg mx-auto">
+            Every paid plan includes full-kit credits — strategy, landing page, voiceover, and promo video in one run.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-4 gap-4 items-stretch">
+          {/* Free */}
+          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+            <div>
+              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Free</p>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-black text-white">$0</span>
+                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
+              </div>
+              <p className="text-zinc-600 text-xs">Doc + landing page only. No credit card.</p>
+            </div>
+            <div className="flex-1 space-y-2.5">
+              {[
+                { on: true,  text: "Brand strategy & product doc" },
+                { on: true,  text: "React + Tailwind landing page" },
+                { on: true,  text: "PDF & DOCX export" },
+                { on: false, text: "AI voiceover" },
+                { on: false, text: "30s promo video" },
+                { on: false, text: "Priority queue" },
+              ].map(({ on, text }) => (
+                <div key={text} className="flex items-center gap-2.5 text-sm">
+                  <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
+                  <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
+                </div>
+              ))}
+            </div>
+            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+              Get started free
+            </button>
+          </div>
+
+          {/* Starter */}
+          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+            <div>
+              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Starter</p>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-black text-white">$9</span>
+                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
+              </div>
+              <p className="text-zinc-600 text-xs">10 full-kit runs · ~$0.90 per run</p>
+            </div>
+            <div className="flex-1 space-y-2.5">
+              {[
+                { on: true, text: "Everything in Free" },
+                { on: true, text: "10 full-kit credits / mo" },
+                { on: true, text: "AI voiceover included" },
+                { on: true, text: "30s promo video included" },
+                { on: false, text: "Priority queue" },
+                { on: false, text: "Rollover unused credits" },
+              ].map(({ on, text }) => (
+                <div key={text} className="flex items-center gap-2.5 text-sm">
+                  <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
+                  <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
+                </div>
+              ))}
+            </div>
+            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+              Start Starter
+            </button>
+          </div>
+
+          {/* Growth — highlighted */}
+          <div className="relative rounded-2xl border border-violet-500/40 bg-violet-950/30 backdrop-blur-sm p-6 flex flex-col gap-5 shadow-[0_0_40px_rgba(139,92,246,0.15)]">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+              <span className="px-3 py-1 rounded-full bg-violet-500 text-white text-[10px] font-bold uppercase tracking-wider shadow-lg whitespace-nowrap">Most popular</span>
+            </div>
+            <div>
+              <p className="text-xs font-mono text-violet-400 uppercase tracking-widest mb-3">Growth</p>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-black text-white">$29</span>
+                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
+              </div>
+              <p className="text-zinc-600 text-xs">50 full-kit runs · ~$0.58 per run</p>
+            </div>
+            <div className="flex-1 space-y-2.5">
+              {[
+                { text: "Everything in Starter" },
+                { text: "50 full-kit credits / mo" },
+                { text: "Priority queue" },
+                { text: "Rollover up to 10 credits" },
+                { text: "Email support" },
+                { text: "Early access to new models" },
+              ].map(({ text }) => (
+                <div key={text} className="flex items-center gap-2.5 text-sm">
+                  <span className="text-emerald-400">✓</span>
+                  <span className="text-zinc-300">{text}</span>
+                </div>
+              ))}
+            </div>
+            <button className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors shadow-[0_0_20px_rgba(139,92,246,0.35)]">
+              Start Growth
+            </button>
+          </div>
+
+          {/* Studio */}
+          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+            <div>
+              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Studio</p>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-black text-white">$99</span>
+                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
+              </div>
+              <p className="text-zinc-600 text-xs">200 full-kit runs · ~$0.50 per run</p>
+            </div>
+            <div className="flex-1 space-y-2.5">
+              {[
+                { text: "Everything in Growth" },
+                { text: "200 full-kit credits / mo" },
+                { text: "Rollover up to 50 credits" },
+                { text: "Dedicated support" },
+                { text: "Team seats (up to 5)" },
+                { text: "Custom brand presets" },
+              ].map(({ text }) => (
+                <div key={text} className="flex items-center gap-2.5 text-sm">
+                  <span className="text-emerald-400">✓</span>
+                  <span className="text-zinc-300">{text}</span>
+                </div>
+              ))}
+            </div>
+            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+              Start Studio
+            </button>
+          </div>
+        </div>
+
+        <p className="text-center text-zinc-600 text-xs mt-6">
+          All paid plans include a 7-day free trial. Full-kit cost is ~$0.30/run at API level — plans reflect hosting, support, and product margin.
+        </p>
+      </section>
+
+      {/* Powered by */}
+      <div className="border-t border-white/6 py-8">
+        <p className="text-center text-zinc-700 text-xs mb-4">Powered by</p>
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-zinc-600 text-xs font-mono">
+          {["Llama 3.3 70B · Groq", "Gemini 2.5 Flash", "Kling 3.0", "Smallest.ai Waves", "RunPod + FFmpeg", "E2B Sandbox"].map((t) => (
+            <span key={t}>{t}</span>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Hero / Input ───────────────────────────────────────────────────────────
+
+interface HeroSectionHandle {
+  focusInput: () => void;
+}
+
+const HeroSection = forwardRef<HeroSectionHandle, {
   idea: string;
   setIdea: (v: string) => void;
   running: boolean;
+  validating: boolean;
   onSubmit: (e: React.FormEvent) => void;
-}) {
+  onValidate: () => void;
+}>(function HeroSection({
+  idea,
+  setIdea,
+  running,
+  validating,
+  onSubmit,
+  onValidate,
+}, ref) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusInput() {
+      inputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => inputRef.current?.focus(), 300);
+    },
+  }));
+
   return (
     <section className="relative text-center pt-20 pb-16 px-4">
       {/* Badge */}
@@ -465,24 +1185,23 @@ function HeroSection({
 
       {/* Headline */}
       <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6">
-        <span className="bg-gradient-to-br from-white via-zinc-100 to-zinc-400 bg-clip-text text-transparent">
+        <span className="bg-linear-to-br from-white via-zinc-100 to-zinc-400 bg-clip-text text-transparent">
           One idea.
         </span>
         <br />
-        <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-blue-400 bg-clip-text text-transparent">
+        <span className="bg-linear-to-r from-violet-400 via-fuchsia-400 to-blue-400 bg-clip-text text-transparent">
           Full launch kit.
         </span>
       </h1>
 
       {/* Sub-headline */}
       <p className="text-zinc-400 text-lg md:text-xl max-w-xl mx-auto mb-3 leading-relaxed">
-        Describe your startup idea and get a product doc, landing page,
-        and intro video in under two minutes.
+        Type your startup idea. Get a product doc, landing page, and promo video in under two minutes.
       </p>
 
       {/* Feature pills */}
       <div className="flex flex-wrap justify-center gap-2 mb-12 text-xs text-zinc-500">
-        {["Strategy & Branding", "Landing Page Code", "Voiceover", "Promo Video"].map((f) => (
+        {["Idea Validation", "Strategy & Branding", "Landing Page Code", "Voiceover", "Promo Video"].map((f) => (
           <span key={f} className="px-3 py-1 rounded-full border border-white/8 bg-white/4 backdrop-blur-sm">
             {f}
           </span>
@@ -493,38 +1212,60 @@ function HeroSection({
       <form onSubmit={onSubmit} className="max-w-2xl mx-auto">
         <div className="relative flex items-center gap-0 rounded-2xl border border-white/15 bg-white/5 backdrop-blur-md p-1.5 shadow-[0_0_40px_rgba(139,92,246,0.15)] focus-within:border-violet-500/50 focus-within:shadow-[0_0_50px_rgba(139,92,246,0.25)] transition-all duration-300">
           <input
+            ref={inputRef}
             type="text"
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
             placeholder="Describe your startup idea in one sentence…"
-            disabled={running}
+            disabled={running || validating}
             className="flex-1 bg-transparent px-4 py-3 text-zinc-100 placeholder-zinc-600 focus:outline-none text-sm disabled:opacity-50"
           />
-          <button
-            type="submit"
-            disabled={running || idea.trim().length < 5}
-            className="relative px-6 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-700 disabled:text-zinc-500 font-semibold text-sm text-white transition-all duration-200 flex items-center gap-2 whitespace-nowrap shadow-[0_0_20px_rgba(139,92,246,0.4)] disabled:shadow-none"
-          >
-            {running ? (
-              <>
-                <span className="w-4 h-4 border-2 border-zinc-400 border-t-white rounded-full animate-spin" />
-                Generating…
-              </>
-            ) : (
-              <>
-                Generate
-                <span className="text-violet-300">→</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onValidate}
+              disabled={running || validating || idea.trim().length < 5}
+              title="Validate your idea before generating"
+              className="px-4 py-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 hover:text-white font-medium text-sm transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap"
+            >
+              {validating ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-violet-400 rounded-full animate-spin" />
+                  Validating…
+                </>
+              ) : (
+                <>
+                  <span className="text-violet-400">🔍</span>
+                  Validate
+                </>
+              )}
+            </button>
+            <button
+              type="submit"
+              disabled={running || validating || idea.trim().length < 5}
+              className="relative px-6 py-3 rounded-xl bg-linear-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-700 disabled:text-zinc-500 font-semibold text-sm text-white transition-all duration-200 flex items-center gap-2 whitespace-nowrap shadow-[0_0_20px_rgba(139,92,246,0.4)] disabled:shadow-none"
+            >
+              {running ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-zinc-400 border-t-white rounded-full animate-spin" />
+                  Generating…
+                </>
+              ) : (
+                <>
+                  Generate
+                  <span className="text-violet-300">→</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <p className="text-zinc-600 text-xs mt-3">
-          Takes ~2 minutes · Powered by Gemini & Kling AI
+          Takes ~2 minutes · Costs ~$0.30 per run · Powered by Gemini & Kling AI
         </p>
       </form>
     </section>
   );
-}
+});
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 
@@ -533,6 +1274,7 @@ type PhaseKey = keyof Phases;
 type LogEntry = { phase: PhaseKey; message: string };
 
 export default function Home() {
+  const { data: session } = useSession();
   const [idea, setIdea] = useState("");
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -548,15 +1290,23 @@ export default function Home() {
   const [websiteCode, setWebsiteCode] = useState<string>();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string>();
+  const [validating, setValidating] = useState(false);
+  const [validatorKey, setValidatorKey] = useState(0);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const activePhaseRef = useRef<PhaseKey>("strategy");
+  const heroRef = useRef<HeroSectionHandle>(null);
 
   const scrollLogs = useCallback(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!session) { signIn("google"); return; }
+    startGenerate();
+  }
+
+  async function startGenerate() {
     if (!idea.trim() || running) return;
 
     setRunning(true);
@@ -591,33 +1341,19 @@ export default function Home() {
         const lines = buffer.split("\n\n");
         buffer = lines.pop() ?? "";
 
-        // Parse all events in this chunk first
         const events: StreamEvent[] = [];
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           events.push(JSON.parse(line.slice(6)));
         }
-        // Process phase/done/error events first so activePhaseRef is correct before logs are tagged
         for (const event of events) {
           if (event.type === "phase" && event.phase && event.status) {
             if (event.status === "running") activePhaseRef.current = event.phase;
             setPhases((prev) => ({ ...prev, [event.phase!]: event.status! }));
             if (event.state?.brandIdentity) setBrand(event.state.brandIdentity);
             if (event.state?.productDoc) setProductDoc(event.state.productDoc);
-          } else if (event.type === "done") {
-            if (event.state?.brandIdentity) setBrand(event.state.brandIdentity);
-            if (event.state?.productDoc) setProductDoc(event.state.productDoc);
-            setDone(true);
-            setRunning(false);
-          } else if (event.type === "error") {
-            setError(event.message);
-            setRunning(false);
-          }
-        }
-        // Then process logs and artifacts (phase is already set correctly)
-        for (const event of events) {
-          if (event.type === "log" && event.message) {
-            setLogs((prev) => [...prev, { phase: activePhaseRef.current, message: event.message! }]);
+          } else if (event.type === "log" && event.message) {
+            setLogs((prev) => [...prev, { phase: (event.phase ?? activePhaseRef.current) as PhaseKey, message: event.message! }]);
             scrollLogs();
           } else if (event.type === "artifact" && event.artifact) {
             setArtifacts((prev) => [...prev, event.artifact!]);
@@ -626,6 +1362,14 @@ export default function Home() {
               const decoded = atob(b64);
               setWebsiteCode(decoded);
             }
+          } else if (event.type === "done") {
+            if (event.state?.brandIdentity) setBrand(event.state.brandIdentity);
+            if (event.state?.productDoc) setProductDoc(event.state.productDoc);
+            setDone(true);
+            setRunning(false);
+          } else if (event.type === "error") {
+            setError(event.message);
+            setRunning(false);
           }
         }
       }
@@ -646,24 +1390,52 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#080810] text-zinc-100 relative overflow-x-hidden">
-      <UserBar />
+      <AuthButton />
       <BackgroundOrbs />
 
       <div className="relative z-10 max-w-5xl mx-auto">
-        {/* Hero / Input */}
+        {/* Hero / Input — always visible */}
         <HeroSection
+          ref={heroRef}
           idea={idea}
           setIdea={setIdea}
           running={running}
+          validating={validating}
           onSubmit={handleSubmit}
+          onValidate={() => {
+            if (idea.trim().length < 5 || running) return;
+            if (!session) { signIn("google"); return; }
+            setValidating(true);
+            setValidatorKey((k) => k + 1);
+          }}
         />
+
+        {/* Idea Validator panel */}
+        {validating && (
+          <section className="px-4 mb-8">
+            <IdeaValidator
+              key={validatorKey}
+              idea={idea}
+              onProceed={() => {
+                setValidating(false);
+                startGenerate();
+              }}
+              onClose={() => setValidating(false)}
+            />
+          </section>
+        )}
+
+        {/* Landing page content — hidden once pipeline starts or validator open */}
+        {!hasOutput && !validating && (
+          <LandingContent onIdeaSelect={(val) => { setIdea(val); heroRef.current?.focusInput(); }} />
+        )}
 
         {/* Pipeline phases */}
         {hasOutput && (
           <section className="px-4 mb-8">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {phaseConfig.map(({ key, label, icon }, i) => (
-                <PhaseIndicator key={key} label={label} status={phases[key]} icon={icon} step={i + 1} />
+                <PhaseIndicator key={key} label={label} status={phases[key]} icon={icon} />
               ))}
             </div>
           </section>
@@ -672,7 +1444,6 @@ export default function Home() {
         {/* Output grid */}
         {hasOutput && (
           <section className="px-4 pb-16 space-y-5">
-            {/* Row 1: Live Log grouped by phase */}
             {logs.length > 0 && (() => {
               const phaseLabels: Record<PhaseKey, string> = {
                 strategy: "Strategy", website: "Website", media: "Media", stitching: "Stitching",
@@ -681,7 +1452,6 @@ export default function Home() {
                 strategy: "text-violet-400", website: "text-blue-400",
                 media: "text-fuchsia-400", stitching: "text-emerald-400",
               };
-              // Group consecutive entries by phase
               const groups: { phase: PhaseKey; entries: LogEntry[] }[] = [];
               for (const entry of logs) {
                 const last = groups[groups.length - 1];
@@ -724,7 +1494,6 @@ export default function Home() {
               );
             })()}
 
-            {/* Row 2: Brand + Product Doc side by side */}
             {(brand || productDoc) && (
               <div className="grid md:grid-cols-2 gap-5 items-start">
                 {brand && <BrandCard brand={brand} />}
@@ -732,7 +1501,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Row 3: Artifacts list */}
             {artifacts.length > 0 && (
               <div className="space-y-2">
                 <h2 className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest px-1">Artifacts</h2>
@@ -744,10 +1512,8 @@ export default function Home() {
               </div>
             )}
 
-            {/* Row 4: Website preview (full width) */}
             {websiteCode && <WebsitePreview code={websiteCode} />}
 
-            {/* Error */}
             {error && (
               <div className="mt-5 rounded-xl border border-red-500/30 bg-red-950/30 backdrop-blur-sm px-5 py-4 text-red-300 text-sm flex items-start gap-3">
                 <span className="text-lg mt-0.5">⚠️</span>
@@ -758,7 +1524,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Done */}
             {done && (
               <div className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-950/20 backdrop-blur-sm px-5 py-4 flex items-center gap-4">
                 <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-xl shrink-0">
@@ -771,13 +1536,6 @@ export default function Home() {
               </div>
             )}
           </section>
-        )}
-
-        {/* Footer (only on idle) */}
-        {!hasOutput && (
-          <footer className="pb-16 text-center text-zinc-700 text-xs space-y-1">
-            <p>Built with Gemini · Kling · Smallest.ai · RunPod</p>
-          </footer>
         )}
       </div>
     </main>
