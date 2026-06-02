@@ -128,7 +128,7 @@ interface AgentState {
   codeFixAttempts: number
 
   // ── Phase 3 outputs ────────────────────────────────────
-  videoScript?: string   // 30-second narration script (~75 words)
+  videoScript?: string   // 20-second narration script (~50 words)
   voiceoverUrl?: string  // MP3 from Smallest.ai
   videoClips?: string[]  // 4 × MP4 URLs from Kling
 
@@ -423,8 +423,8 @@ When key is absent, falls back to regex:
 ### Sub-step 1 — Script Generation (Llama 3.3 70B via Groq)
 
 ```
-System: You are a video scriptwriter. Write a punchy 30-second product demo script
-        (approx 75 words). Plain text, pauses as "...", no stage directions.
+System: You are a video scriptwriter. Write a punchy 20-second product demo script
+        (approx 50 words). Plain text, pauses as "...", no stage directions.
 
 User:   Brand: <brandIdentity JSON>
         Product doc summary: <first 600 chars of productDoc>
@@ -449,7 +449,7 @@ Returns `{ audio_url: string }` — a direct MP3 download URL.
 
 ### Sub-step 3 — Video Clips (Kling 3.0 API)
 
-4 clips are generated in **parallel** (`Promise.all`) to save time. Each clip is 5 seconds at 16:9.
+4 clips are generated in **parallel** (`Promise.allSettled`) to save time. Each clip is 5 seconds at 16:9 — 4 × 5 sec = 20-second final video.
 
 **Create endpoint:** `POST https://api.klingai.com/v1/videos/text2video`
 
@@ -813,7 +813,7 @@ PHASE 2: BUILDER (Gemini 2.5 Flash + E2B)
 PHASE 3: PRODUCER (Llama 3.3 70B + Smallest.ai + Kling)
 ─────────────────────────────────────────────────────
       │
-      ├─► [Llama 3.3 70B] brandIdentity + productDoc → videoScript (75 words)
+      ├─► [Llama 3.3 70B] brandIdentity + productDoc → videoScript (50 words)
       │
       ├─► [Smallest.ai] videoScript → voiceoverUrl (MP3)
       │

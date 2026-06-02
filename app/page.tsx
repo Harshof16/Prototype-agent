@@ -432,6 +432,7 @@ function WebsitePreview({ code }: { code: string }) {
   );
 }
 
+
 // ── Auth button (floating) ────────────────────────────────────────────────
 
 function AuthButton() {
@@ -797,6 +798,218 @@ function IdeaValidator({ idea, onProceed, onClose }: IdeaValidatorProps) {
 
 // ── Background ─────────────────────────────────────────────────────────────
 
+type BillingCycle = "monthly" | "quarterly" | "halfyearly" | "annual";
+
+const CYCLE_LABELS: Record<BillingCycle, string> = {
+  monthly:    "Monthly",
+  quarterly:  "Quarterly  −10%",
+  halfyearly: "Half-yearly  −17%",
+  annual:     "Annual  −25%",
+};
+
+const BASE_PRICES: Record<string, number> = {
+  starter: 9,
+  growth:  29,
+  studio:  99,
+  agency:  299,
+};
+
+const CYCLE_MULTIPLIER: Record<BillingCycle, number> = {
+  monthly:    1,
+  quarterly:  0.90,
+  halfyearly: 0.83,
+  annual:     0.75,
+};
+
+const CYCLE_PERIOD: Record<BillingCycle, number> = {
+  monthly:    1,
+  quarterly:  3,
+  halfyearly: 6,
+  annual:     12,
+};
+
+function cyclePrice(plan: string, cycle: BillingCycle): number {
+  return Math.round(BASE_PRICES[plan] * CYCLE_MULTIPLIER[cycle] * CYCLE_PERIOD[cycle]);
+}
+
+function effectiveMonthly(plan: string, cycle: BillingCycle): string {
+  const monthly = BASE_PRICES[plan] * CYCLE_MULTIPLIER[cycle];
+  return monthly % 1 === 0 ? `$${monthly}` : `$${monthly.toFixed(2)}`;
+}
+
+function PricingSection() {
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
+
+  const isMonthly = cycle === "monthly";
+  const periodLabel = isMonthly ? "/ mo" : `/ ${cycle === "quarterly" ? "quarter" : cycle === "halfyearly" ? "6 mo" : "year"}`;
+
+  return (
+    <section className="max-w-5xl mx-auto px-4 pt-4 pb-16">
+      <div className="text-center mb-8">
+        <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Pricing</p>
+        <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">Simple, transparent pricing</h2>
+        <p className="text-zinc-500 text-sm max-w-lg mx-auto">
+          Every paid plan includes full-kit credits — strategy, landing page, voiceover, and promo video in one run.
+        </p>
+      </div>
+
+      {/* Billing cycle toggle */}
+      <div className="flex justify-center mb-10">
+        <div className="inline-flex rounded-xl border border-white/10 bg-white/3 p-1 gap-1">
+          {(Object.keys(CYCLE_LABELS) as BillingCycle[]).map((c) => (
+            <button
+              key={c}
+              onClick={() => setCycle(c)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                cycle === c
+                  ? "bg-violet-600 text-white shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {CYCLE_LABELS[c]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-4 gap-4 items-stretch">
+        {/* Free */}
+        <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+          <div>
+            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Free</p>
+            <div className="flex items-end gap-1 mb-1">
+              <span className="text-4xl font-black text-white">$0</span>
+              <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
+            </div>
+            <p className="text-zinc-600 text-xs">Doc + landing page only. No credit card.</p>
+          </div>
+          <div className="flex-1 space-y-2.5">
+            {[
+              { on: true,  text: "Brand strategy & product doc" },
+              { on: true,  text: "React + Tailwind landing page" },
+              { on: true,  text: "PDF & DOCX export" },
+              { on: false, text: "AI voiceover" },
+              { on: false, text: "20s promo video" },
+              { on: false, text: "Priority queue" },
+            ].map(({ on, text }) => (
+              <div key={text} className="flex items-center gap-2.5 text-sm">
+                <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
+                <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
+              </div>
+            ))}
+          </div>
+          <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+            Get started free
+          </button>
+        </div>
+
+        {/* Starter */}
+        <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+          <div>
+            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Starter</p>
+            <div className="flex items-end gap-1 mb-1">
+              <span className="text-4xl font-black text-white">${cyclePrice("starter", cycle)}</span>
+              <span className="text-zinc-500 text-sm mb-1.5">{periodLabel}</span>
+            </div>
+            <p className="text-zinc-600 text-xs">
+              10 full-kit runs / mo{!isMonthly && ` · ${effectiveMonthly("starter", cycle)}/mo`}
+            </p>
+          </div>
+          <div className="flex-1 space-y-2.5">
+            {[
+              { on: true,  text: "Everything in Free" },
+              { on: true,  text: "10 full-kit credits / mo" },
+              { on: true,  text: "AI voiceover included" },
+              { on: true,  text: "20s promo video included" },
+              { on: false, text: "Priority queue" },
+              { on: false, text: "Rollover unused credits" },
+            ].map(({ on, text }) => (
+              <div key={text} className="flex items-center gap-2.5 text-sm">
+                <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
+                <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
+              </div>
+            ))}
+          </div>
+          <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+            Start Starter
+          </button>
+        </div>
+
+        {/* Growth — highlighted */}
+        <div className="relative rounded-2xl border border-violet-500/40 bg-violet-950/30 backdrop-blur-sm p-6 flex flex-col gap-5 shadow-[0_0_40px_rgba(139,92,246,0.15)]">
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+            <span className="px-3 py-1 rounded-full bg-violet-500 text-white text-[10px] font-bold uppercase tracking-wider shadow-lg whitespace-nowrap">Most popular</span>
+          </div>
+          <div>
+            <p className="text-xs font-mono text-violet-400 uppercase tracking-widest mb-3">Growth</p>
+            <div className="flex items-end gap-1 mb-1">
+              <span className="text-4xl font-black text-white">${cyclePrice("growth", cycle)}</span>
+              <span className="text-zinc-500 text-sm mb-1.5">{periodLabel}</span>
+            </div>
+            <p className="text-zinc-600 text-xs">
+              50 full-kit runs / mo{!isMonthly && ` · ${effectiveMonthly("growth", cycle)}/mo`}
+            </p>
+          </div>
+          <div className="flex-1 space-y-2.5">
+            {[
+              "Everything in Starter",
+              "50 full-kit credits / mo",
+              "Priority queue",
+              "Rollover up to 10 credits",
+              "Email support",
+              "Early access to new models",
+            ].map((text) => (
+              <div key={text} className="flex items-center gap-2.5 text-sm">
+                <span className="text-emerald-400">✓</span>
+                <span className="text-zinc-300">{text}</span>
+              </div>
+            ))}
+          </div>
+          <button className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors shadow-[0_0_20px_rgba(139,92,246,0.35)]">
+            Start Growth
+          </button>
+        </div>
+
+        {/* Studio */}
+        <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
+          <div>
+            <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Studio</p>
+            <div className="flex items-end gap-1 mb-1">
+              <span className="text-4xl font-black text-white">${cyclePrice("studio", cycle)}</span>
+              <span className="text-zinc-500 text-sm mb-1.5">{periodLabel}</span>
+            </div>
+            <p className="text-zinc-600 text-xs">
+              200 full-kit runs / mo{!isMonthly && ` · ${effectiveMonthly("studio", cycle)}/mo`}
+            </p>
+          </div>
+          <div className="flex-1 space-y-2.5">
+            {[
+              "Everything in Growth",
+              "200 full-kit credits / mo",
+              "Rollover up to 50 credits",
+              "Dedicated support",
+              "Team seats (up to 5)",
+              "Custom brand presets",
+            ].map((text) => (
+              <div key={text} className="flex items-center gap-2.5 text-sm">
+                <span className="text-emerald-400">✓</span>
+                <span className="text-zinc-300">{text}</span>
+              </div>
+            ))}
+          </div>
+          <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
+            Start Studio
+          </button>
+        </div>
+      </div>
+
+      <p className="text-center text-zinc-600 text-xs mt-6">
+        All paid plans include a 7-day free trial. Longer billing cycles are charged upfront and are non-refundable after the trial period.
+      </p>
+    </section>
+  );
+}
+
 function BackgroundOrbs() {
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -897,7 +1110,7 @@ const EXAMPLE_IDEAS = [
 
 const STATS = [
   { value: "~2 min", label: "Average run time" },
-  { value: "$0.30", label: "Cost per full kit" },
+  { value: "from $9", label: "Per month, all-inclusive" },
   { value: "5", label: "AI agents in the pipeline" },
   { value: "4+", label: "Deliverables per run" },
 ];
@@ -993,144 +1206,7 @@ function LandingContent({ onIdeaSelect }: { onIdeaSelect: (idea: string) => void
       </section>
 
       {/* Pricing */}
-      <section className="max-w-5xl mx-auto px-4 pt-4 pb-16">
-        <div className="text-center mb-10">
-          <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Pricing</p>
-          <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">Simple, transparent pricing</h2>
-          <p className="text-zinc-500 text-sm max-w-lg mx-auto">
-            Every paid plan includes full-kit credits — strategy, landing page, voiceover, and promo video in one run.
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-4 gap-4 items-stretch">
-          {/* Free */}
-          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
-            <div>
-              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Free</p>
-              <div className="flex items-end gap-1 mb-1">
-                <span className="text-4xl font-black text-white">$0</span>
-                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
-              </div>
-              <p className="text-zinc-600 text-xs">Doc + landing page only. No credit card.</p>
-            </div>
-            <div className="flex-1 space-y-2.5">
-              {[
-                { on: true,  text: "Brand strategy & product doc" },
-                { on: true,  text: "React + Tailwind landing page" },
-                { on: true,  text: "PDF & DOCX export" },
-                { on: false, text: "AI voiceover" },
-                { on: false, text: "30s promo video" },
-                { on: false, text: "Priority queue" },
-              ].map(({ on, text }) => (
-                <div key={text} className="flex items-center gap-2.5 text-sm">
-                  <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
-                  <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
-                </div>
-              ))}
-            </div>
-            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
-              Get started free
-            </button>
-          </div>
-
-          {/* Starter */}
-          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
-            <div>
-              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Starter</p>
-              <div className="flex items-end gap-1 mb-1">
-                <span className="text-4xl font-black text-white">$9</span>
-                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
-              </div>
-              <p className="text-zinc-600 text-xs">10 full-kit runs · ~$0.90 per run</p>
-            </div>
-            <div className="flex-1 space-y-2.5">
-              {[
-                { on: true, text: "Everything in Free" },
-                { on: true, text: "10 full-kit credits / mo" },
-                { on: true, text: "AI voiceover included" },
-                { on: true, text: "30s promo video included" },
-                { on: false, text: "Priority queue" },
-                { on: false, text: "Rollover unused credits" },
-              ].map(({ on, text }) => (
-                <div key={text} className="flex items-center gap-2.5 text-sm">
-                  <span className={on ? "text-emerald-400" : "text-zinc-700"}>{on ? "✓" : "✕"}</span>
-                  <span className={on ? "text-zinc-300" : "text-zinc-600"}>{text}</span>
-                </div>
-              ))}
-            </div>
-            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
-              Start Starter
-            </button>
-          </div>
-
-          {/* Growth — highlighted */}
-          <div className="relative rounded-2xl border border-violet-500/40 bg-violet-950/30 backdrop-blur-sm p-6 flex flex-col gap-5 shadow-[0_0_40px_rgba(139,92,246,0.15)]">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-              <span className="px-3 py-1 rounded-full bg-violet-500 text-white text-[10px] font-bold uppercase tracking-wider shadow-lg whitespace-nowrap">Most popular</span>
-            </div>
-            <div>
-              <p className="text-xs font-mono text-violet-400 uppercase tracking-widest mb-3">Growth</p>
-              <div className="flex items-end gap-1 mb-1">
-                <span className="text-4xl font-black text-white">$29</span>
-                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
-              </div>
-              <p className="text-zinc-600 text-xs">50 full-kit runs · ~$0.58 per run</p>
-            </div>
-            <div className="flex-1 space-y-2.5">
-              {[
-                { text: "Everything in Starter" },
-                { text: "50 full-kit credits / mo" },
-                { text: "Priority queue" },
-                { text: "Rollover up to 10 credits" },
-                { text: "Email support" },
-                { text: "Early access to new models" },
-              ].map(({ text }) => (
-                <div key={text} className="flex items-center gap-2.5 text-sm">
-                  <span className="text-emerald-400">✓</span>
-                  <span className="text-zinc-300">{text}</span>
-                </div>
-              ))}
-            </div>
-            <button className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors shadow-[0_0_20px_rgba(139,92,246,0.35)]">
-              Start Growth
-            </button>
-          </div>
-
-          {/* Studio */}
-          <div className="rounded-2xl border border-white/10 bg-white/3 backdrop-blur-sm p-6 flex flex-col gap-5">
-            <div>
-              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-3">Studio</p>
-              <div className="flex items-end gap-1 mb-1">
-                <span className="text-4xl font-black text-white">$99</span>
-                <span className="text-zinc-500 text-sm mb-1.5">/ mo</span>
-              </div>
-              <p className="text-zinc-600 text-xs">200 full-kit runs · ~$0.50 per run</p>
-            </div>
-            <div className="flex-1 space-y-2.5">
-              {[
-                { text: "Everything in Growth" },
-                { text: "200 full-kit credits / mo" },
-                { text: "Rollover up to 50 credits" },
-                { text: "Dedicated support" },
-                { text: "Team seats (up to 5)" },
-                { text: "Custom brand presets" },
-              ].map(({ text }) => (
-                <div key={text} className="flex items-center gap-2.5 text-sm">
-                  <span className="text-emerald-400">✓</span>
-                  <span className="text-zinc-300">{text}</span>
-                </div>
-              ))}
-            </div>
-            <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
-              Start Studio
-            </button>
-          </div>
-        </div>
-
-        <p className="text-center text-zinc-600 text-xs mt-6">
-          All paid plans include a 7-day free trial. Full-kit cost is ~$0.30/run at API level — plans reflect hosting, support, and product margin.
-        </p>
-      </section>
+      <PricingSection />
 
       {/* Powered by */}
       <div className="border-t border-white/6 py-8">
@@ -1260,7 +1336,7 @@ const HeroSection = forwardRef<HeroSectionHandle, {
           </div>
         </div>
         <p className="text-zinc-600 text-xs mt-3">
-          Takes ~2 minutes · Costs ~$0.30 per run · Powered by Gemini & Kling AI
+          Takes ~2 minutes · From $9/mo · Powered by Gemini & Kling AI
         </p>
       </form>
     </section>

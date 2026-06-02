@@ -17,7 +17,7 @@ async function generateVideoScript(state: AgentState): Promise<string> {
     messages: [
       {
         role: "system",
-        content: `You are a video scriptwriter. Write a punchy 15-second product demo script (approx 30 words, strictly under 280 characters total).
+        content: `You are a video scriptwriter. Write a punchy 20-second product demo script (approx 50 words, strictly under 450 characters total).
 Format as plain text with natural pauses indicated by "..." — no stage directions, no scene headings. Output ONLY the script text, nothing else.`,
       },
       {
@@ -44,7 +44,7 @@ async function generateVoiceover(script: string): Promise<string> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      text: script.length > 280 ? script.slice(0, 280).replace(/\s\S*$/, "") : script,
+      text: script.length > 450 ? script.slice(0, 450).replace(/\s\S*$/, "") : script,
       voice_id: "emily",
       sample_rate: 24000,
       speed: 1.0,

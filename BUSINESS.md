@@ -1,6 +1,6 @@
 # Prototype Agent — Business Overview
 
-> From idea to investor-ready prototype in 2 minutes, for $0.30.
+> From idea to investor-ready prototype in 2 minutes.
 
 ---
 
@@ -55,9 +55,9 @@ The result: **most ideas never get prototyped.** Not because they aren't good, b
 
 1. A **5-section product document** (strategy, market, features, GTM)
 2. A **fully-coded landing page** (React + Tailwind, renders in a browser)
-3. A **30-second intro video** (AI voiceover + AI video clips, stitched together)
+3. A **20-second intro video** (AI voiceover + AI video clips, stitched together)
 
-Total cost per run: **~$0.30.**
+All of this is available from **$9/month** — with no per-output fees hidden inside the plan.
 
 Before committing to a full run, founders can use the built-in **Idea Validator** — a structured AI conversation that stress-tests the idea across market size, competition, feasibility, uniqueness, and monetisation, then produces a scored report with verdict, competitor analysis, risks, and actionable suggestions. The validator adds less than $0.001 per use and takes 2–3 minutes to complete.
 
@@ -132,7 +132,7 @@ A fully coded, mobile-responsive single-page website built to the brand spec:
 The code is validated in a sandboxed environment and auto-corrected if it fails compilation — up to 2 attempts before surfacing to the user.
 
 ### Output 3 — Intro Video (MP4, 1920×1080)
-A 30-second produced video ready for a pitch deck, a tweet, or a product hunt launch:
+A 20-second produced video ready for a pitch deck, a tweet, or a product hunt launch:
 
 - AI-written voiceover script (~75 words, punchy, no jargon)
 - Human-quality narration via text-to-speech
@@ -214,7 +214,7 @@ The user watches this happen in real time via a live progress dashboard — no w
 
 ## 6. Cost Structure
 
-### Per-run cost breakdown (~$0.30 total)
+### Internal cost per full pipeline run (not shown to users)
 
 | Stage | Service used | Role | Cost per run |
 |-------|-------------|------|-------------|
@@ -224,40 +224,103 @@ The user watches this happen in real time via a live progress dashboard — no w
 | Voiceover (30 sec) | Smallest.ai Waves | Text-to-speech narration | ~$0.060 |
 | Video clips (4 × 5 sec) | Kling 3.0 | AI video generation | ~$0.20–0.40 |
 | Video render (2 min GPU) | RunPod Serverless | FFmpeg stitch + encode | ~$0.020 |
-| **Total** | | | **~$0.28–0.48** |
+| **COGS (full run)** | | | **~$0.28–0.48** |
+| **COGS (doc + website only)** | | | **~$0.004** |
 
-The video clips account for ~85% of total cost. Everything else — strategy, website, voiceover, rendering — costs under $0.10 combined.
+The video clips account for ~85% of COGS. All text outputs — strategy, document, landing page — cost under $0.01 combined.
 
-### Monthly infrastructure cost (fixed)
+### Monthly infrastructure (fixed)
 
 | Service | Plan | Monthly cost |
 |---------|------|-------------|
 | Kling 3.0 | Starter subscription | $10.00 |
-| Vercel (hosting) | Hobby / Pro | $0–$20 |
+| Vercel (hosting) | Pro | $20.00 |
 | RunPod | Pay-per-use, no base fee | $0 |
 | All others | Pay-per-use | $0 |
-| **Total fixed** | | **$10–$30/month** |
+| **Total fixed** | | **~$30/month** |
 
-### Cost at scale
+### Pricing tiers (what users see)
 
-| Monthly runs | Variable cost | Fixed cost | Total | Cost per run |
-|-------------|--------------|-----------|-------|-------------|
-| 10 | ~$3 | $20 | ~$23 | ~$2.30 |
-| 100 | ~$30 | $20 | ~$50 | ~$0.50 |
-| 500 | ~$150 | $20 | ~$170 | ~$0.34 |
-| 1,000 | ~$300 | $20 | ~$320 | ~$0.32 |
-| 5,000 | ~$1,500 | $20 | ~$1,520 | ~$0.30 |
+No per-run pricing is exposed. Users purchase a plan — credits are the unit. Billing cycles: monthly, quarterly (−10%), half-yearly (−17%), or annual (−25%).
 
-At 1,000+ runs/month the fixed Kling subscription becomes negligible and the per-run cost stabilises at ~$0.30.
+| Plan | Price/mo | Credits included | Extra credits | COGS at $0.40 avg | Gross margin |
+|------|---------|-----------------|--------------|-------------------|-------------|
+| **Starter** | $9 | 10 full runs | — | ~$4 | ~55% |
+| **Growth** | $29 | 50 full runs | $0.75/credit | ~$20 | ~31% |
+| **Studio** | $99 | 200 full runs | $0.60/credit | ~$80 | ~19% |
+| **Agency** | $299 | 750 full runs | $0.50/credit | ~$300 | ~0%* |
 
-### Budget-mode cost (no video generation)
-If Kling/RunPod keys are not configured, the agent produces the product doc and landing page only:
+\* Agency plan margin is thin on runs alone — anchored by API access fees, white-label rights, and team seats rather than pure credit volume.
 
-| Run cost (doc + website only) | ~$0.004 |
-|-------------------------------|---------|
-| 1,000 runs/month | ~$4 total |
+### Margin summary by tier
 
-This is the Week 1–2 configuration — essentially free at any scale.
+| Plan | Revenue | COGS (runs) | Fixed overhead share | Net contribution |
+|------|---------|-------------|---------------------|-----------------|
+| Starter | $9 | ~$4 | ~$1.50 | **~$3.50 (~39%)** |
+| Growth | $29 | ~$20 | ~$3 | **~$6 (~21%)** |
+| Studio | $99 | ~$80 | ~$5 | **~$14 (~14%)** |
+| Agency | $299 | ~$300 | ~$10 | **break-even on runs; profitable via seats/API** |
+
+Target blend: Starter + Growth users drive volume; Studio drives margin; Agency drives B2B revenue.
+
+### Break-even
+
+| Scenario | Monthly cost to cover | Plans needed |
+|----------|----------------------|-------------|
+| Infrastructure only ($30) | 4 Starter plans | Trivial |
+| 100 runs/month ($40 COGS + $30 infra) | 8 Starter or 3 Growth | Very low bar |
+| Profitable at 500 runs/month | ~$230 COGS + $30 infra | ~30 Starter or 9 Growth plans |
+
+---
+
+## 6b. Alternative Video Generation Models — Cost & Infrastructure Analysis
+
+The current stack uses **Kling 3.0** for AI video clip generation (~$0.05–0.10/clip). Below is a qualitative comparison of the realistic alternatives and what switching would cost — in dollars and in engineering effort.
+
+### Model comparison
+
+| Model | Quality tier | Style | Cost per 5-sec clip | Latency | API availability |
+|-------|-------------|-------|--------------------|---------|--------------------|
+| **Kling 3.0** *(current)* | High | Cinematic, realistic | ~$0.05–0.10 | ~20–30 sec | REST API, stable |
+| **Runway Gen-4** | Very high | Filmic, consistent motion | ~$0.25–0.50 | ~30–60 sec | REST API, stable |
+| **Sora (OpenAI)** | Very high | Photorealistic, long coherence | ~$0.50–1.50 | ~60–180 sec | API (limited access) |
+| **Luma Dream Machine** | High | Smooth motion, less photorealistic | ~$0.10–0.20 | ~30–45 sec | REST API, stable |
+| **Pika 2.2** | Medium–High | Stylized, fast | ~$0.05–0.15 | ~15–25 sec | REST API, stable |
+| **Wan 2.1 (open-source)** | Medium | Flexible, customizable | ~$0.02–0.05 (GPU cost only) | ~45–90 sec on A100 | Self-hosted |
+| **Remotion (no generation)** | N/A — motion graphics | Animated website screenshots | ~$0.001 | ~10–15 sec | Local/serverless |
+
+### Cost impact on per-run COGS (4 clips per run)
+
+| Model | 4-clip cost | New total COGS | vs. current | New Starter margin |
+|-------|------------|----------------|-------------|-------------------|
+| Kling 3.0 *(current)* | ~$0.20–0.40 | ~$0.28–0.48 | baseline | ~55% |
+| Pika 2.2 | ~$0.20–0.60 | ~$0.28–0.68 | similar | ~45–55% |
+| Luma Dream Machine | ~$0.40–0.80 | ~$0.48–0.88 | +$0.20–0.40 | ~35–45% |
+| Runway Gen-4 | ~$1.00–2.00 | ~$1.08–2.08 | +$0.80–1.60 | **margin destroyed** |
+| Sora | ~$2.00–6.00 | ~$2.08–6.08 | +$1.80–5.60 | **not viable at $9 Starter** |
+| Wan 2.1 (self-hosted) | ~$0.08–0.20 | ~$0.16–0.28 | −$0.12–0.20 | **best margin** |
+| Remotion | ~$0.004 | ~$0.08 | **−$0.20–0.40** | **highest margin, no AI video** |
+
+### Infrastructure changes required
+
+| Model | Swap difficulty | What changes in the codebase |
+|-------|----------------|------------------------------|
+| **Pika 2.2** | Low — 1–2 days | Replace Kling API calls in `app/api/generate/media/route.ts`. Auth headers + prompt schema differs slightly. Everything else identical. |
+| **Luma Dream Machine** | Low — 1–2 days | Same as Pika. REST API with polling. Response schema maps cleanly to current clip URL handling. |
+| **Runway Gen-4** | Medium — 3–5 days | Different prompt structure (camera motion params). Polling loop needs longer timeout (60 sec). Quality warrants new clip-review step before stitch. |
+| **Sora** | High — 1–2 weeks | Waitlist / limited API access. Very different prompt schema. Much longer latency blows up the SSE streaming UX — requires job queue + webhook callback instead of in-line await. |
+| **Wan 2.1 (self-hosted)** | High — 1–2 weeks | Must deploy a persistent GPU worker (RunPod or Lambda Labs). Adds model download + warm-up time. Requires inference queue. Saves significant COGS at scale but adds operational burden. |
+| **Remotion** | Medium — 3–5 days | No video API at all. Replace media stage with Remotion Lambda render. Animates the generated website screenshot + brand colors. Zero model dependency. Already on the roadmap. |
+
+### Recommendation
+
+For **v1 launch**: stay on Kling 3.0. It's proven, fast, and priced within margin at Starter tier.
+
+For **margin optimisation at scale**: self-hosted Wan 2.1 on RunPod cuts clip COGS by ~60% but adds infra complexity. Worth evaluating at 500+ runs/month.
+
+For **premium tier upsell**: offer Runway Gen-4 as an opt-in on Studio/Agency plans where the COGS hit is absorbed by higher plan revenue. Position as "cinema-quality clips."
+
+For **eliminating model risk entirely**: Remotion is the cleanest long-term path — deterministic output, near-zero cost, no third-party dependency. Already on the roadmap as "Beyond v1." Accelerate if Kling has reliability issues.
 
 ---
 
@@ -268,17 +331,17 @@ This is the Week 1–2 configuration — essentially free at any scale.
 | | Traditional approach | Prototype Agent |
 |--|---------------------|----------------|
 | **Time to first draft** | 3–6 weeks | 2 minutes |
-| **Cost per prototype** | $5,000–$22,000 | $0.30 |
+| **Cost per prototype** | $5,000–$22,000 | from $0.90 (Starter) |
 | **Vendors required** | 3–5 | 0 |
 | **Brand consistency** | Depends on briefing | Guaranteed (shared state) |
-| **Iteration cost** | Full cost again | $0.30 again |
+| **Iteration cost** | Full cost again | Uses 1 credit (included in plan) |
 | **Barrier to test an idea** | High (budget approval) | None |
 
 ### The iteration advantage
 
 The most undervalued aspect is not the first prototype — it's the second and third. With a traditional workflow, iterating means briefing vendors again, waiting again, paying again. Most ideas never get iterated because the cost is prohibitive.
 
-At $0.30 per run, a founder can test 10 variations of an idea in an afternoon for $3. That changes the quality of ideas that reach market — not because the agent makes better decisions, but because it removes the economic penalty for being wrong early.
+On the Starter plan, a founder gets 10 full runs for $9 — enough to test 10 variations of an idea in an afternoon. That changes the quality of ideas that reach market — not because the agent makes better decisions, but because it removes the economic penalty for being wrong early.
 
 ### The speed advantage — compounding over time
 
@@ -319,42 +382,84 @@ The moat is not any individual AI model — those are commodities. The moat is t
 
 ## 9. Revenue Model (If Productized)
 
-### Option A — Credit-based SaaS
+### Option A — Subscription plans (primary)
 
-Users purchase credits. Each full pipeline run costs 1 credit.
+Users subscribe to a plan. Credits are the unit — no per-run pricing is ever shown. Longer billing cycles get a discount, improving both cash flow and retention.
 
-| Tier | Price | Credits | Cost/credit | Margin at $0.30 COGS |
-|------|-------|---------|------------|----------------------|
-| Starter | $9/mo | 10 credits | $0.90 | 67% |
-| Growth | $29/mo | 50 credits | $0.58 | 48% |
-| Studio | $99/mo | 200 credits | $0.50 | 40% |
-| Agency | $299/mo | 750 credits | $0.40 | 25% |
+#### Monthly billing
 
-### Option B — Per-output pricing
+| Plan | Price/mo | Full runs included | Extra credits | Best for |
+|------|---------|-------------------|--------------|---------|
+| **Starter** | $9 | 10 | — | Solo founders, side projects |
+| **Growth** | $29 | 50 | $0.75 | Active builders, PMs |
+| **Studio** | $99 | 200 | $0.60 | Agencies, small studios |
+| **Agency** | $299 | 750 | $0.50 | Venture studios, accelerators |
 
-Charge separately for each output type, unbundled:
+#### Quarterly billing (save ~10%)
 
-- Product doc only: $2
-- Landing page only: $5
+Billed every 3 months. Credits reset each month within the quarter.
+
+| Plan | Price/quarter | Effective $/mo | Saving vs monthly |
+|------|--------------|---------------|-------------------|
+| **Starter** | $24 | $8 | ~11% |
+| **Growth** | $78 | $26 | ~10% |
+| **Studio** | $267 | $89 | ~10% |
+| **Agency** | $807 | $269 | ~10% |
+
+#### Half-yearly billing (save ~17%)
+
+Billed every 6 months. Credits reset monthly.
+
+| Plan | Price/6 mo | Effective $/mo | Saving vs monthly |
+|------|-----------|---------------|-------------------|
+| **Starter** | $45 | $7.50 | ~17% |
+| **Growth** | $145 | $24 | ~17% |
+| **Studio** | $495 | $82.50 | ~17% |
+| **Agency** | $1,494 | $249 | ~17% |
+
+#### Annual billing (save ~25%)
+
+Billed once per year. Credits reset monthly. Best cash-flow option for the business — full year collected upfront.
+
+| Plan | Price/year | Effective $/mo | Saving vs monthly |
+|------|-----------|---------------|-------------------|
+| **Starter** | $81 | $6.75 | ~25% |
+| **Growth** | $261 | $21.75 | ~25% |
+| **Studio** | $891 | $74.25 | ~25% |
+| **Agency** | $2,691 | $224.25 | ~25% |
+
+#### Why this structure works
+
+- **For users:** longer commitment = lower effective price. Annual Starter ($6.75/mo) is psychologically a better deal than paying $9 twelve times.
+- **For us:** annual and half-yearly plans convert variable monthly revenue into predictable upfront cash. A single annual Agency sign-up ($2,691) covers ~90 months of infrastructure at once.
+- **Churn reduction:** quarterly+ subscribers are 2–3× less likely to cancel than monthly (standard SaaS pattern) — they've already paid and feel invested.
+
+Unused credits do not roll over month-to-month (creates renewal incentive within the billing period). Extra credits purchasable on-demand at any tier.
+
+### Option B — Per-output pricing (light users)
+
+Charge separately for each output type, unbundled — captures one-off users who don't want a subscription:
+
+- Product doc + landing page only: $5
 - Full run (doc + page + video): $15
+- Idea Validator only: $1
 
-Captures users who only need one output without forcing them into a subscription.
-
-### Option C — Embedded / white-label API
+### Option C — Embedded / white-label API (B2B)
 
 Sell API access to accelerators, venture studios, and agencies who embed the pipeline into their own tools or workflows.
 
-- $0.50–$2.00 per API call (vs. $0.30 COGS)
+- $1.50–$3.00 per API call
 - Minimum commitment: $500/month
 - Target: 50–200 studios and accelerators globally
+- Includes custom brand watermark removal, webhook callbacks, and usage dashboards
 
 ### Option D — Enterprise licensing
 
-For large innovation teams (corporate R&D, strategy consulting firms) that need high-volume, white-labelled, on-premise or private-cloud deployment.
+For large innovation teams (corporate R&D, strategy consulting firms) that need high-volume, white-labelled, or on-premise deployment.
 
 - Annual license: $50,000–$200,000
 - Includes custom model fine-tuning on company brand guidelines
-- Dedicated infrastructure, SLA, support
+- Dedicated infrastructure, SLA, priority support, Slack channel
 
 ---
 
@@ -427,12 +532,13 @@ Currently each run is stateless — the agent has no knowledge of previous runs 
 
 | Dimension | Detail |
 |-----------|--------|
-| **Core value** | Collapse 6 weeks and $5,000–$22,000 of prototype work into 2 minutes and $0.30 |
+| **Core value** | Collapse 6 weeks and $5,000–$22,000 of prototype work into 2 minutes |
 | **Primary output** | Product doc + landing page + intro video, brand-consistent across all three |
 | **Built-in validator** | 5-question AI evaluation with scored report before committing to a full run |
 | **Primary user** | Founders, PMs, venture studios who need to validate ideas fast |
-| **Cost per run** | ~$0.30 (full pipeline) / ~$0.004 (doc + website only) / ~$0.001 (validation only) |
-| **Monthly fixed cost** | $10–$30 (Kling subscription + hosting) |
-| **Gross margin at $9 retail** | ~97% variable margin, ~65% contribution margin |
+| **Pricing** | Monthly plans from $9 (10 runs) to $299 (750 runs) — no per-run pricing shown to users |
+| **Internal COGS** | ~$0.30–0.48/full run (video-heavy) · ~$0.004 (doc + website only) |
+| **Gross margin (Starter)** | ~39% contribution after COGS and infra share |
 | **Key risk** | Output is prototype-grade, not production-grade — manages expectations |
 | **Key moat** | Shared brand state across all outputs + built-in validation — not replicated by any single-output AI tool |
+| **Video model flexibility** | Kling (current) → Runway Gen-4 (premium upsell) → Wan 2.1 self-hosted (cost leader) → Remotion (zero dependency) |
