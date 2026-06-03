@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef, startTransition } from "react";
 import NextImage from "next/image";
 import { useSession, signIn, signOut } from "next-auth/react";
 import type { StreamEvent, AgentState, PhaseStatus } from "@/lib/types";
@@ -119,6 +119,37 @@ function ArtifactCard({
           </div>
         </div>
         <audio controls src={artifact.url} className="w-full h-10 accent-pink-500" />
+      </div>
+    );
+  }
+
+  if (artifact.type === "video") {
+    return (
+      <div className={`flex flex-col gap-3 px-4 py-3 rounded-xl border bg-linear-to-r backdrop-blur-sm ${cls}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{icons.video}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">{artifact.label}</p>
+              <p className="text-xs text-zinc-500 truncate mt-0.5">{artifact.url.slice(0, 55)}…</p>
+            </div>
+          </div>
+          <a
+            href={artifact.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 text-zinc-500 hover:text-white text-sm transition-colors"
+            title="Open in new tab"
+          >
+            ↗
+          </a>
+        </div>
+        <video
+          controls
+          src={artifact.url}
+          className="w-full rounded-lg max-h-56 bg-black"
+          preload="metadata"
+        />
       </div>
     );
   }
@@ -373,16 +404,17 @@ try {
 
 function WebsitePreview({ code }: { code: string }) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
-
-  const blobUrl = useMemo(() => {
-    const html = buildPreviewHtml(code);
-    const blob = new Blob([html], { type: "text/html" });
-    return URL.createObjectURL(blob);
-  }, [code]);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    return () => URL.revokeObjectURL(blobUrl);
-  }, [blobUrl]);
+    const html = buildPreviewHtml(code);
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    startTransition(() => setBlobUrl(url));
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [code]);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden backdrop-blur-sm">
@@ -1212,7 +1244,7 @@ function LandingContent({ onIdeaSelect }: { onIdeaSelect: (idea: string) => void
       <div className="border-t border-white/6 py-8">
         <p className="text-center text-zinc-700 text-xs mb-4">Powered by</p>
         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-zinc-600 text-xs font-mono">
-          {["Llama 3.3 70B · Groq", "Gemini 2.5 Flash", "Kling 3.0", "Smallest.ai Waves", "RunPod + FFmpeg", "E2B Sandbox"].map((t) => (
+          {["Llama 3.3 70B · Groq", "Gemini 2.5 Flash", "Magic Hour", "Smallest.ai Waves", "RunPod + FFmpeg", "E2B Sandbox"].map((t) => (
             <span key={t}>{t}</span>
           ))}
         </div>
@@ -1336,7 +1368,7 @@ const HeroSection = forwardRef<HeroSectionHandle, {
           </div>
         </div>
         <p className="text-zinc-600 text-xs mt-3">
-          Takes ~2 minutes · From $9/mo · Powered by Gemini & Kling AI
+          Takes ~2 minutes · From $9/mo · Powered by Gemini & Magic Hour
         </p>
       </form>
     </section>

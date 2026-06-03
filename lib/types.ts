@@ -37,6 +37,7 @@ export interface AgentState {
   videoScript?: string;
   voiceoverUrl?: string;
   videoClips?: string[];
+  videoClipLabels?: string[];
 
   // Phase 4: Stitched output
   finalVideoUrl?: string;

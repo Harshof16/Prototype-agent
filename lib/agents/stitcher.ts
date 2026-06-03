@@ -86,11 +86,8 @@ export async function runStitcherAgent(
   }
 
   if (!process.env.RUNPOD_API_KEY || !process.env.RUNPOD_ENDPOINT_ID) {
-    emit("Stitcher: RunPod not configured — returning asset bundle without rendering.");
-    return {
-      finalVideoUrl: videoClips[0],
-      phases: { ...state.phases, stitching: "done" },
-    };
+    emit("Stitcher: RunPod not configured — clips available individually.");
+    return { phases: { ...state.phases, stitching: "done" } };
   }
 
   emit("Stitcher: submitting FFmpeg job to RunPod Serverless...");

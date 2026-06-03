@@ -1,4 +1,4 @@
-// Phase 3: Producer Agent — Smallest.ai (voiceover) + Kling 3.0 (video clips)
+// Phase 3: Producer Agent — Smallest.ai (voiceover) + Magic Hour (video clips)
 // Llama 3.3 via Groq writes the 30-second script, then triggers media APIs in parallel.
 
 import OpenAI from "openai";
@@ -71,50 +71,56 @@ async function generateVoiceover(script: string): Promise<string> {
   return `data:audio/wav;base64,${audioBase64}`;
 }
 
-// ── Video clips: Kling 3.0 API ────────────────────────────────────────────
+// ── Video clips: Magic Hour API ───────────────────────────────────────────
 
 async function generateVideoClip(prompt: string, index: number): Promise<string> {
-  if (!process.env.KLING_API_KEY) {
+  if (!process.env.MAGIC_HOUR_API_KEY) {
     return `https://placeholder.video/clip${index}.mp4`;
   }
 
-  // Kling v1 text-to-video endpoint
-  const createRes = await fetch("https://api.klingai.com/v1/videos/text2video", {
+  const createRes = await fetch("https://api.magichour.ai/v1/text-to-video", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.KLING_API_KEY}`,
+      Authorization: `Bearer ${process.env.MAGIC_HOUR_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "kling-v1",
-      prompt,
+      end_seconds: 5,
+      style: { prompt },
       aspect_ratio: "16:9",
-      duration: "5",
     }),
   });
 
   if (!createRes.ok) {
-    throw new Error(`Kling create failed: ${createRes.status}`);
+    const errText = await createRes.text();
+    throw new Error(`Magic Hour create failed: ${createRes.status} ${errText}`);
   }
 
-  const { task_id } = await createRes.json();
+  const { id } = await createRes.json();
 
   // Poll until complete (up to 3 minutes)
   for (let i = 0; i < 36; i++) {
     await new Promise((r) => setTimeout(r, 5000));
-    const pollRes = await fetch(`https://api.klingai.com/v1/videos/text2video/${task_id}`, {
-      headers: { Authorization: `Bearer ${process.env.KLING_API_KEY}` },
+    const pollRes = await fetch(`https://api.magichour.ai/v1/video-projects/${id}`, {
+      headers: { Authorization: `Bearer ${process.env.MAGIC_HOUR_API_KEY}` },
     });
     const pollData = await pollRes.json();
-    if (pollData.status === "succeed") {
-      return pollData.works?.[0]?.resource?.resource ?? pollData.video_url;
+    if (pollData.status === "complete") {
+      return pollData.downloads?.[0]?.url ?? pollData.url;
     }
-    if (pollData.status === "failed") {
-      throw new Error(`Kling generation failed for clip ${index}`);
+    if (pollData.status === "error" || pollData.status === "canceled") {
+      throw new Error(`Magic Hour generation failed for clip ${index}: ${pollData.error?.message ?? pollData.status}`);
     }
   }
-  throw new Error(`Kling timed out for clip ${index}`);
+  throw new Error(`Magic Hour timed out for clip ${index}`);
 }
+
+const CLIP_SCENE_LABELS = [
+  "Product Reveal",
+  "Lifestyle Shot",
+  "Feature Close-up",
+  "Brand Outro",
+];
 
 function buildClipPrompts(state: AgentState): string[] {
   const brand = state.brandIdentity!;
@@ -144,7 +150,7 @@ export async function runProducerAgent(
     emit(`Producer: voiceover failed — ${(e as Error).message}`);
   }
 
-  emit("Producer: generating video clips with Kling 3.0 (this takes ~2 minutes)...");
+  emit("Producer: generating video clips with Magic Hour (this takes ~2 minutes)...");
   const clipPrompts = buildClipPrompts(state);
 
   // Generate all clips in parallel; collect results and surface per-clip failures
@@ -172,10 +178,12 @@ export async function runProducerAgent(
   }
 
   emit(`Producer: done (voiceover: ${voiceoverUrl ? "ok" : "failed"}, clips: ${videoClips.length}/${clipPrompts.length}).`);
+  const videoClipLabels = videoClips.map((_, i) => CLIP_SCENE_LABELS[i] ?? `Clip ${i + 1}`);
   return {
     videoScript,
     voiceoverUrl,
     videoClips,
+    videoClipLabels,
     phases: { ...state.phases, media: clipsOk ? "done" : "error" },
   };
 }

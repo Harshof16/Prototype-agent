@@ -127,17 +127,22 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     state = { ...state, ...stitcherUpdate };
     yield* flushQueue();
     if (state.finalVideoUrl) {
-      yield { type: "artifact", artifact: { type: "video", url: state.finalVideoUrl, label: "Final Video" } };
+      yield { type: "artifact", artifact: { type: "video", url: state.finalVideoUrl, label: "Final Stitched Video" } };
+    } else if (state.videoClips?.length) {
+      for (let i = 0; i < state.videoClips.length; i++) {
+        const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
+        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
+      }
     }
-    yield { type: "phase", phase: "stitching", status: state.finalVideoUrl ? "done" : "error" as PhaseStatus };
+    yield { type: "phase", phase: "stitching", status: state.finalVideoUrl || state.videoClips?.length ? "done" : "error" as PhaseStatus };
   } catch (e: unknown) {
     yield* flushQueue();
     yield { type: "phase", phase: "stitching", status: "error" as PhaseStatus };
     yield { type: "log", phase: "stitching", message: `Stitching failed: ${(e as Error).message}` };
-    // Emit raw clips so the user can download them even though stitching failed
     if (state.videoClips?.length) {
       for (let i = 0; i < state.videoClips.length; i++) {
-        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label: `Video Clip ${i + 1}` } };
+        const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
+        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
       }
     }
   }
