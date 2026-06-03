@@ -7,8 +7,8 @@ An AI pipeline that transforms a single idea into three investor-ready, brand-co
 [Early Access](https://prototype-agent-puce.vercel.app/)
 
 <img width="2870" height="1456" alt="Screenshot 2026-06-03 234904" src="https://github.com/user-attachments/assets/89db243f-de2d-47b3-b0a5-a06cef35db6e" />
-<img width="2874" height="1425" alt="Screenshot 2026-06-03 234958" src="https://github.com/user-attachments/assets/8ccd4a08-90b9-4598-a1c6-ed824ef808f8" />
 <img width="2872" height="860" alt="Screenshot 2026-06-03 234936" src="https://github.com/user-attachments/assets/2abdf5dc-82ca-4979-b440-92e30c843b53" />
+<img width="2874" height="1425" alt="Screenshot 2026-06-03 234958" src="https://github.com/user-attachments/assets/8ccd4a08-90b9-4598-a1c6-ed824ef808f8" />
 
 
 ---
