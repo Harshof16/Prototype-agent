@@ -24,7 +24,7 @@ export function createInitialState(rawIdea: string): AgentState {
   };
 }
 
-export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent> {
+export async function* runPipeline(rawIdea: string, tier: string = "FREE"): AsyncGenerator<StreamEvent> {
   let state = createInitialState(rawIdea);
 
   function emit(message: string): void {
@@ -89,60 +89,64 @@ export async function* runPipeline(rawIdea: string): AsyncGenerator<StreamEvent>
     yield { type: "log", phase: "website", message: `Website build failed: ${(e as Error).message}` };
   }
 
-  // ── Phase 3: Media ───────────────────────────────────────────────────────
-  currentPhase = "media";
-  state.phases.media = "running";
-  yield { type: "phase", phase: "media", status: "running", message: "Generating media assets..." };
+  // ── Phases 3 & 4: Media + Stitching (paid plans only) ───────────────────
+  if (tier === "FREE") {
+    yield { type: "log", phase: "media", message: "Media and video generation is available on paid plans. Upgrade to unlock voiceover and promo video." };
+    yield { type: "phase", phase: "media", status: "pending" };
+    yield { type: "phase", phase: "stitching", status: "pending" };
+  } else {
+    currentPhase = "media";
+    state.phases.media = "running";
+    yield { type: "phase", phase: "media", status: "running", message: "Generating media assets..." };
 
-  let mediaFailed = false;
-  try {
-    const producerUpdate = await runProducerAgent(state, log);
-    state = { ...state, ...producerUpdate };
-    yield* flushQueue();
-    if (state.videoScript) {
-      yield { type: "artifact", artifact: { type: "script", url: "data:text/plain;charset=utf-8," + encodeURIComponent(state.videoScript), label: "Video Script" } };
-    }
-    if (state.voiceoverUrl) {
-      // Emit voiceover immediately — don't wait for video stitching
-      yield { type: "artifact", artifact: { type: "voiceover", url: state.voiceoverUrl, label: "Voiceover Audio" } };
-    }
-    const noClips = !state.videoClips?.length;
-    if (noClips) mediaFailed = true;
-    yield { type: "phase", phase: "media", status: noClips ? "error" as PhaseStatus : "done" };
-  } catch (e: unknown) {
-    yield* flushQueue();
-    mediaFailed = true;
-    yield { type: "phase", phase: "media", status: "error" as PhaseStatus };
-    yield { type: "log", phase: "media", message: `Media generation failed: ${(e as Error).message}` };
-  }
-
-  // ── Phase 4: Stitching ───────────────────────────────────────────────────
-  currentPhase = "stitching";
-  state.phases.stitching = "running";
-  yield { type: "phase", phase: "stitching", status: "running", message: "Stitching final video..." };
-
-  try {
-    if (mediaFailed) throw new Error("Skipped: media phase did not complete");
-    const stitcherUpdate = await runStitcherAgent(state, log);
-    state = { ...state, ...stitcherUpdate };
-    yield* flushQueue();
-    if (state.finalVideoUrl) {
-      yield { type: "artifact", artifact: { type: "video", url: state.finalVideoUrl, label: "Final Stitched Video" } };
-    } else if (state.videoClips?.length) {
-      for (let i = 0; i < state.videoClips.length; i++) {
-        const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
-        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
+    let mediaFailed = false;
+    try {
+      const producerUpdate = await runProducerAgent(state, log);
+      state = { ...state, ...producerUpdate };
+      yield* flushQueue();
+      if (state.videoScript) {
+        yield { type: "artifact", artifact: { type: "script", url: "data:text/plain;charset=utf-8," + encodeURIComponent(state.videoScript), label: "Video Script" } };
       }
+      if (state.voiceoverUrl) {
+        yield { type: "artifact", artifact: { type: "voiceover", url: state.voiceoverUrl, label: "Voiceover Audio" } };
+      }
+      const noClips = !state.videoClips?.length;
+      if (noClips) mediaFailed = true;
+      yield { type: "phase", phase: "media", status: noClips ? "error" as PhaseStatus : "done" };
+    } catch (e: unknown) {
+      yield* flushQueue();
+      mediaFailed = true;
+      yield { type: "phase", phase: "media", status: "error" as PhaseStatus };
+      yield { type: "log", phase: "media", message: `Media generation failed: ${(e as Error).message}` };
     }
-    yield { type: "phase", phase: "stitching", status: state.finalVideoUrl || state.videoClips?.length ? "done" : "error" as PhaseStatus };
-  } catch (e: unknown) {
-    yield* flushQueue();
-    yield { type: "phase", phase: "stitching", status: "error" as PhaseStatus };
-    yield { type: "log", phase: "stitching", message: `Stitching failed: ${(e as Error).message}` };
-    if (state.videoClips?.length) {
-      for (let i = 0; i < state.videoClips.length; i++) {
-        const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
-        yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
+
+    currentPhase = "stitching";
+    state.phases.stitching = "running";
+    yield { type: "phase", phase: "stitching", status: "running", message: "Stitching final video..." };
+
+    try {
+      if (mediaFailed) throw new Error("Skipped: media phase did not complete");
+      const stitcherUpdate = await runStitcherAgent(state, log);
+      state = { ...state, ...stitcherUpdate };
+      yield* flushQueue();
+      if (state.finalVideoUrl) {
+        yield { type: "artifact", artifact: { type: "video", url: state.finalVideoUrl, label: "Final Stitched Video" } };
+      } else if (state.videoClips?.length) {
+        for (let i = 0; i < state.videoClips.length; i++) {
+          const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
+          yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
+        }
+      }
+      yield { type: "phase", phase: "stitching", status: state.finalVideoUrl || state.videoClips?.length ? "done" : "error" as PhaseStatus };
+    } catch (e: unknown) {
+      yield* flushQueue();
+      yield { type: "phase", phase: "stitching", status: "error" as PhaseStatus };
+      yield { type: "log", phase: "stitching", message: `Stitching failed: ${(e as Error).message}` };
+      if (state.videoClips?.length) {
+        for (let i = 0; i < state.videoClips.length; i++) {
+          const label = state.videoClipLabels?.[i] ?? `Video Clip ${i + 1}`;
+          yield { type: "artifact", artifact: { type: "video", url: state.videoClips[i], label } };
+        }
       }
     }
   }

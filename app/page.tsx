@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef, startTransition } from "react";
 import NextImage from "next/image";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import type { StreamEvent, AgentState, PhaseStatus } from "@/lib/types";
 import type { ValidatorTurn, ValidationReport } from "@/lib/agents/validator";
 
@@ -467,8 +468,25 @@ function WebsitePreview({ code }: { code: string }) {
 
 // ── Auth button (floating) ────────────────────────────────────────────────
 
-function AuthButton() {
+type Subscription = { tier: string; creditsUsed: number; creditsTotal: number };
+
+function AuthButton({ refreshTrigger }: { refreshTrigger: number }) {
   const { data: session, status } = useSession();
+  const router = useRouter();
+  const [sub, setSub] = useState<Subscription | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      if (!session) { setSub(null); return; }
+      try {
+        const r = await fetch("/api/user/subscription");
+        setSub(r.ok ? await r.json() : null);
+      } catch {
+        setSub(null);
+      }
+    }
+    load();
+  }, [session, refreshTrigger]);
 
   if (status === "loading") {
     return (
@@ -482,7 +500,7 @@ function AuthButton() {
     return (
       <div className="fixed top-4 right-4 z-50">
         <button
-          onClick={() => signIn("google")}
+          onClick={() => router.push("/auth/signin")}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-zinc-900 font-semibold text-sm hover:bg-zinc-100 transition-colors shadow-lg"
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -497,8 +515,21 @@ function AuthButton() {
     );
   }
 
+  const remaining = sub ? sub.creditsTotal - sub.creditsUsed : null;
+  const creditColor =
+    remaining === null ? "" :
+    remaining === 0 ? "text-red-400 border-red-500/30 bg-red-950/30" :
+    remaining === 1 ? "text-amber-400 border-amber-500/30 bg-amber-950/30" :
+    "text-emerald-400 border-emerald-500/30 bg-emerald-950/30";
+
   return (
     <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+      {sub && (
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${creditColor}`}>
+          <span>{remaining === 0 ? "⚡" : "⚡"}</span>
+          <span>{remaining} / {sub.creditsTotal} trials</span>
+        </div>
+      )}
       {session.user?.image && (
         <NextImage
           src={session.user.image}
@@ -870,6 +901,8 @@ function effectiveMonthly(plan: string, cycle: BillingCycle): string {
 }
 
 function PricingSection() {
+  const { data: session } = useSession();
+  const router = useRouter();
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
 
   const isMonthly = cycle === "monthly";
@@ -930,8 +963,11 @@ function PricingSection() {
               </div>
             ))}
           </div>
-          <button className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors">
-            Get started free
+          <button
+            onClick={() => { if (!session) router.push("/auth/signin"); }}
+            className="w-full py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm font-semibold hover:bg-white/5 transition-colors"
+          >
+            {session ? "You're on Free" : "Get started free"}
           </button>
         </div>
 
@@ -1383,6 +1419,7 @@ type LogEntry = { phase: PhaseKey; message: string };
 
 export default function Home() {
   const { data: session } = useSession();
+  const router = useRouter();
   const [idea, setIdea] = useState("");
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -1400,6 +1437,7 @@ export default function Home() {
   const [error, setError] = useState<string>();
   const [validating, setValidating] = useState(false);
   const [validatorKey, setValidatorKey] = useState(0);
+  const [subRefresh, setSubRefresh] = useState(0);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const activePhaseRef = useRef<PhaseKey>("strategy");
   const heroRef = useRef<HeroSectionHandle>(null);
@@ -1410,7 +1448,7 @@ export default function Home() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!session) { signIn("google"); return; }
+    if (!session) { router.push("/auth/signin"); return; }
     startGenerate();
   }
 
@@ -1434,6 +1472,13 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idea }),
       });
+
+      if (res.status === 429) {
+        setError("You've used all your free trials. Upgrade to keep generating.");
+        setRunning(false);
+        setSubRefresh((n) => n + 1);
+        return;
+      }
 
       if (!res.body) throw new Error("No response stream");
 
@@ -1475,9 +1520,11 @@ export default function Home() {
             if (event.state?.productDoc) setProductDoc(event.state.productDoc);
             setDone(true);
             setRunning(false);
+            setSubRefresh((n) => n + 1);
           } else if (event.type === "error") {
             setError(event.message);
             setRunning(false);
+            setSubRefresh((n) => n + 1);
           }
         }
       }
@@ -1498,7 +1545,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#080810] text-zinc-100 relative overflow-x-hidden">
-      <AuthButton />
+      <AuthButton refreshTrigger={subRefresh} />
       <BackgroundOrbs />
 
       <div className="relative z-10 max-w-5xl mx-auto">
@@ -1512,7 +1559,7 @@ export default function Home() {
           onSubmit={handleSubmit}
           onValidate={() => {
             if (idea.trim().length < 5 || running) return;
-            if (!session) { signIn("google"); return; }
+            if (!session) { router.push("/auth/signin"); return; }
             setValidating(true);
             setValidatorKey((k) => k + 1);
           }}
