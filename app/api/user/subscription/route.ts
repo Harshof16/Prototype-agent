@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
+// Internal admin accounts exempt from the free-trial credit limit.
+const UNLIMITED_EMAILS = ["harshs@observancegroup.com"];
+
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -17,5 +20,7 @@ export async function GET() {
     select: { tier: true, creditsUsed: true, creditsTotal: true, renewsAt: true },
   });
 
-  return Response.json(sub);
+  const unlimited = UNLIMITED_EMAILS.includes(session.user.email ?? "");
+
+  return Response.json({ ...sub, unlimited });
 }

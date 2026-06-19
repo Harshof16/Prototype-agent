@@ -4,6 +4,9 @@ import { runPipeline } from "@/lib/pipeline";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+
+// Internal admin accounts exempt from the free-trial credit limit.
+const UNLIMITED_EMAILS = ["harshs@observancegroup.com"];
 export const maxDuration = 300; // 5 minutes for full pipeline
 
 export async function POST(req: NextRequest) {
@@ -15,7 +18,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const { idea } = await req.json();
+  const { idea, theme } = await req.json();
 
   if (!idea || typeof idea !== "string" || idea.trim().length < 5) {
     return new Response(JSON.stringify({ error: "Idea must be at least 5 characters." }), {
@@ -24,6 +27,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const isUnlimited = UNLIMITED_EMAILS.includes(session.user.email ?? "");
+
   // Fetch subscription, creating a FREE one if this is an existing user without one
   const sub = await prisma.subscription.upsert({
     where: { userId: session.user.id },
@@ -31,22 +36,27 @@ export async function POST(req: NextRequest) {
     create: { userId: session.user.id },
   });
 
-  if (sub.creditsUsed >= sub.creditsTotal) {
+  if (!isUnlimited && sub.creditsUsed >= sub.creditsTotal) {
     return new Response(
       JSON.stringify({ error: "credit_limit_reached", tier: sub.tier }),
       { status: 429, headers: { "Content-Type": "application/json" } }
     );
   }
 
-  // Create Run + deduct credit atomically before the pipeline starts
+  // Create Run, and deduct a credit atomically before the pipeline starts —
+  // unlimited accounts skip the credit deduction entirely.
   const [run] = await prisma.$transaction([
     prisma.run.create({
       data: { userId: session.user.id, idea: idea.trim(), status: "RUNNING" },
     }),
-    prisma.subscription.update({
-      where: { userId: session.user.id },
-      data: { creditsUsed: { increment: 1 } },
-    }),
+    ...(isUnlimited
+      ? []
+      : [
+          prisma.subscription.update({
+            where: { userId: session.user.id },
+            data: { creditsUsed: { increment: 1 } },
+          }),
+        ]),
   ]);
 
   const encoder = new TextEncoder();
@@ -57,7 +67,8 @@ export async function POST(req: NextRequest) {
       const artifacts: Record<string, string> = {};
 
       try {
-        for await (const event of runPipeline(idea.trim(), sub.tier)) {
+        const trimmedTheme = typeof theme === "string" && theme.trim().length > 0 ? theme.trim() : undefined;
+        for await (const event of runPipeline(idea.trim(), sub.tier, trimmedTheme)) {
           const chunk = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(chunk));
 

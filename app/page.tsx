@@ -4,8 +4,9 @@ import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardR
 import NextImage from "next/image";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import type { StreamEvent, AgentState, PhaseStatus } from "@/lib/types";
+import type { StreamEvent, AgentState, PhaseStatus, ThemeOption } from "@/lib/types";
 import type { ValidatorTurn, ValidationReport } from "@/lib/agents/validator";
+import DograhVoiceWidget from "@/app/components/DograhVoiceWidget";
 
 const TOTAL_QUESTIONS = 5;
 
@@ -348,8 +349,10 @@ function buildPreviewHtml(code: string): string {
   const componentName = exportMatch?.[1] ?? "LandingPage";
 
   // Collect named react imports so we can re-inject them as globals
+  // (matches both `import { useState } from "react"` and the default+named
+  // combo `import React, { useState } from "react"`)
   const reactImports: string[] = [];
-  code.replace(/^import\s+\{([^}]*)\}\s+from\s+['"]react['"];?\s*$/gm, (_, names: string) => {
+  code.replace(/^import\s+(?:\w+\s*,\s*)?\{([^}]*)\}\s+from\s+['"]react['"];?\s*$/gm, (_, names: string) => {
     names.split(",").map((n: string) => n.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean).forEach((n: string) => reactImports.push(n));
     return "";
   });
@@ -364,6 +367,13 @@ function buildPreviewHtml(code: string): string {
     .replace(/^import\s.*from\s+['"]react['"];?\s*$/gm, "")
     .replace(/export\s+default\s+/, "");
 
+  // Base64-encode (UTF-8 safe) so the TSX source can sit inert in the DOM
+  // and be handed to Babel.transform() with an explicit filename — the
+  // automatic type="text/babel" DOM scan never sets a filename, which
+  // makes @babel/preset-typescript silently no-op and break on TS syntax.
+  const fullSource = `${reactGlobals}\n${cleaned}`;
+  const encodedSource = btoa(unescape(encodeURIComponent(fullSource)));
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -371,33 +381,37 @@ function buildPreviewHtml(code: string): string {
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js" crossorigin></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>body{margin:0}</style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body{margin:0;font-family:'Inter',ui-sans-serif,system-ui,sans-serif}</style>
 </head>
 <body>
   <div id="root"></div>
   <div id="error" style="display:none;padding:16px;background:#fee;color:#c00;font:13px monospace;white-space:pre-wrap"></div>
+  <script id="source" type="text/plain">${encodedSource}</script>
   <script>
     window.onerror = function(msg, src, line, col, err) {
       var el = document.getElementById('error');
       el.style.display = 'block';
       el.textContent = (err ? err.stack : msg) || msg;
     };
-  </script>
-  <script type="text/babel" data-presets="react,typescript" data-plugins="transform-modules-umd">
-${reactGlobals}
-${cleaned}
-
-try {
-  const domRoot = document.getElementById('root');
-  const reactRoot = ReactDOM.createRoot(domRoot);
-  reactRoot.render(React.createElement(${componentName}));
-} catch(e) {
-  const el = document.getElementById('error');
-  el.style.display = 'block';
-  el.textContent = e.stack || e.message;
-}
+    try {
+      var b64 = document.getElementById('source').textContent;
+      var source = decodeURIComponent(escape(window.atob(b64)));
+      var result = Babel.transform(source, { presets: ['react', 'typescript'], filename: 'component.tsx' });
+      var run = new Function('React', 'ReactDOM', result.code + '\\n;return ${componentName};');
+      var Component = run(React, ReactDOM);
+      var domRoot = document.getElementById('root');
+      var reactRoot = ReactDOM.createRoot(domRoot);
+      reactRoot.render(React.createElement(Component));
+    } catch(e) {
+      var el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = e.stack || e.message;
+    }
   </script>
 </body>
 </html>`;
@@ -468,7 +482,7 @@ function WebsitePreview({ code }: { code: string }) {
 
 // ── Auth button (floating) ────────────────────────────────────────────────
 
-type Subscription = { tier: string; creditsUsed: number; creditsTotal: number };
+type Subscription = { tier: string; creditsUsed: number; creditsTotal: number; unlimited?: boolean };
 
 function AuthButton({ refreshTrigger }: { refreshTrigger: number }) {
   const { data: session, status } = useSession();
@@ -524,7 +538,13 @@ function AuthButton({ refreshTrigger }: { refreshTrigger: number }) {
 
   return (
     <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
-      {sub && (
+      {sub && sub.unlimited && (
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold text-violet-300 border-violet-500/30 bg-violet-950/30">
+          <span>⚡</span>
+          <span>Unlimited</span>
+        </div>
+      )}
+      {sub && !sub.unlimited && (
         <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${creditColor}`}>
           <span>{remaining === 0 ? "⚡" : "⚡"}</span>
           <span>{remaining} / {sub.creditsTotal} trials</span>
@@ -855,6 +875,80 @@ function IdeaValidator({ idea, onProceed, onClose }: IdeaValidatorProps) {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Theme Selector ───────────────────────────────────────────────────────
+
+interface ThemeSelectorProps {
+  themes: ThemeOption[];
+  loading: boolean;
+  error: string | null;
+  onSelect: (theme: ThemeOption) => void;
+  onRetry: () => void;
+  onClose: () => void;
+}
+
+function ThemeSelector({ themes, loading, error, onSelect, onRetry, onClose }: ThemeSelectorProps) {
+  return (
+    <div className="rounded-2xl border border-violet-500/30 bg-[#0d0d1a] backdrop-blur-sm overflow-hidden shadow-[0_0_40px_rgba(139,92,246,0.15)]">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/8 bg-violet-950/20">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+          <span className="text-xs font-semibold text-violet-300 uppercase tracking-wider">Choose a Theme</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none"
+          aria-label="Close theme selector"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="p-5">
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-10 text-zinc-500 text-sm">
+            <span className="w-4 h-4 border-2 border-zinc-600 border-t-violet-400 rounded-full animate-spin" />
+            Generating theme options…
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-xs text-red-300">
+            {error} — <button onClick={onRetry} className="underline">retry</button>
+          </div>
+        )}
+
+        {!loading && !error && (
+          <>
+            <p className="text-xs text-zinc-500 mb-4">
+              No theme specified — pick a direction and we&apos;ll build your brand around it.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {themes.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => onSelect(t)}
+                  className="group text-left rounded-xl border border-white/10 bg-white/4 hover:border-violet-500/50 hover:bg-violet-950/20 transition-all duration-200 p-4 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-white text-sm">{t.name}</h3>
+                    <div className="flex gap-1">
+                      {Object.values(t.colors).map((c, i) => (
+                        <span key={i} className="w-3.5 h-3.5 rounded-full border border-white/20" style={{ background: c }} />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">{t.description}</p>
+                  <p className="text-[10px] text-zinc-600 uppercase tracking-widest">{t.mood}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -1298,6 +1392,8 @@ interface HeroSectionHandle {
 const HeroSection = forwardRef<HeroSectionHandle, {
   idea: string;
   setIdea: (v: string) => void;
+  theme: string;
+  setTheme: (v: string) => void;
   running: boolean;
   validating: boolean;
   onSubmit: (e: React.FormEvent) => void;
@@ -1305,11 +1401,16 @@ const HeroSection = forwardRef<HeroSectionHandle, {
 }>(function HeroSection({
   idea,
   setIdea,
+  theme,
+  setTheme,
   running,
   validating,
   onSubmit,
   onValidate,
 }, ref) {
+  const handleVoiceTranscript = (text: string) => {
+    setIdea(text);
+  };
   const inputRef = useRef<HTMLInputElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -1365,6 +1466,7 @@ const HeroSection = forwardRef<HeroSectionHandle, {
             className="flex-1 bg-transparent px-4 py-3 text-zinc-100 placeholder-zinc-600 focus:outline-none text-sm disabled:opacity-50"
           />
           <div className="flex items-center gap-1.5 shrink-0">
+            <DograhVoiceWidget onTranscript={handleVoiceTranscript} />
             <button
               type="button"
               onClick={onValidate}
@@ -1403,6 +1505,14 @@ const HeroSection = forwardRef<HeroSectionHandle, {
             </button>
           </div>
         </div>
+        <input
+          type="text"
+          value={theme}
+          onChange={(e) => setTheme(e.target.value)}
+          placeholder="Theme (optional) — e.g. 'minimalist pastel'. Leave blank to choose from suggestions."
+          disabled={running || validating}
+          className="w-full mt-2.5 bg-white/3 border border-white/10 rounded-xl px-4 py-2.5 text-zinc-200 placeholder-zinc-600 text-xs focus:outline-none focus:border-violet-500/50 disabled:opacity-50 transition-colors"
+        />
         <p className="text-zinc-600 text-xs mt-3">
           Takes ~2 minutes · From $9/mo · Powered by Gemini & Magic Hour
         </p>
@@ -1421,6 +1531,11 @@ export default function Home() {
   const { data: session } = useSession();
   const router = useRouter();
   const [idea, setIdea] = useState("");
+  const [theme, setTheme] = useState("");
+  const [choosingTheme, setChoosingTheme] = useState(false);
+  const [themeOptions, setThemeOptions] = useState<ThemeOption[]>([]);
+  const [loadingThemes, setLoadingThemes] = useState(false);
+  const [themeFetchError, setThemeFetchError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [phases, setPhases] = useState<Phases>({
@@ -1449,11 +1564,38 @@ export default function Home() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!session) { router.push("/auth/signin"); return; }
-    startGenerate();
+    if (running || choosingTheme) return;
+    if (theme.trim()) {
+      startGenerate(theme.trim());
+      return;
+    }
+    fetchThemeOptions();
   }
 
-  async function startGenerate() {
+  async function fetchThemeOptions() {
     if (!idea.trim() || running) return;
+    setChoosingTheme(true);
+    setLoadingThemes(true);
+    setThemeFetchError(null);
+    try {
+      const res = await fetch("/api/generate/themes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
+      setThemeOptions(data.themes ?? []);
+    } catch (e: unknown) {
+      setThemeFetchError((e as Error).message);
+    } finally {
+      setLoadingThemes(false);
+    }
+  }
+
+  async function startGenerate(chosenTheme?: string) {
+    if (!idea.trim() || running) return;
+    setChoosingTheme(false);
 
     setRunning(true);
     setDone(false);
@@ -1470,7 +1612,7 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea }),
+        body: JSON.stringify({ idea, theme: chosenTheme }),
       });
 
       if (res.status === 429) {
@@ -1554,16 +1696,32 @@ export default function Home() {
           ref={heroRef}
           idea={idea}
           setIdea={setIdea}
+          theme={theme}
+          setTheme={setTheme}
           running={running}
-          validating={validating}
+          validating={validating || choosingTheme}
           onSubmit={handleSubmit}
           onValidate={() => {
-            if (idea.trim().length < 5 || running) return;
+            if (idea.trim().length < 5 || running || choosingTheme) return;
             if (!session) { router.push("/auth/signin"); return; }
             setValidating(true);
             setValidatorKey((k) => k + 1);
           }}
         />
+
+        {/* Theme selector — shown when the user didn't specify their own theme */}
+        {choosingTheme && (
+          <section className="px-4 mb-8">
+            <ThemeSelector
+              themes={themeOptions}
+              loading={loadingThemes}
+              error={themeFetchError}
+              onSelect={(t) => startGenerate(t.name)}
+              onRetry={fetchThemeOptions}
+              onClose={() => setChoosingTheme(false)}
+            />
+          </section>
+        )}
 
         {/* Idea Validator panel */}
         {validating && (
@@ -1573,15 +1731,19 @@ export default function Home() {
               idea={idea}
               onProceed={() => {
                 setValidating(false);
-                startGenerate();
+                if (theme.trim()) {
+                  startGenerate(theme.trim());
+                } else {
+                  fetchThemeOptions();
+                }
               }}
               onClose={() => setValidating(false)}
             />
           </section>
         )}
 
-        {/* Landing page content — hidden once pipeline starts or validator open */}
-        {!hasOutput && !validating && (
+        {/* Landing page content — hidden once pipeline starts or validator/theme selector open */}
+        {!hasOutput && !validating && !choosingTheme && (
           <LandingContent onIdeaSelect={(val) => { setIdea(val); heroRef.current?.focusInput(); }} />
         )}
 

@@ -2,7 +2,7 @@
 // Generates Brand Identity, Sitemap, and Product Doc, then self-reflects.
 
 import OpenAI from "openai";
-import { AgentState, BrandIdentity, SitemapPage } from "../types";
+import { AgentState, BrandIdentity, SitemapPage, ThemeOption } from "../types";
 
 const client = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
@@ -42,6 +42,30 @@ function normalizeBrandIdentity(b: BrandIdentity) {
   b.targetAudience = stringify(b.targetAudience);
 }
 
+// Generates a handful of distinct visual/brand theme directions for the
+// user to pick from when they haven't specified a theme of their own.
+export async function generateThemeOptions(rawIdea: string): Promise<ThemeOption[]> {
+  const raw = await chatJson([
+    {
+      role: "system",
+      content: `You are a brand strategist. Given a raw startup idea, propose 4 distinct, clearly differentiated visual theme directions the founder could choose for their brand.
+Return a JSON object: { themes: [{ name, description, mood, colors: { primary, secondary, accent } }] }
+- name: a short, evocative theme name (2-4 words)
+- description: 1 sentence on the visual style and feel
+- mood: a few comma-separated adjectives
+- colors: hex codes that represent the theme's palette
+Return only valid JSON.`,
+    },
+    {
+      role: "user",
+      content: `Raw idea: "${rawIdea}"`,
+    },
+  ]);
+
+  const parsed = JSON.parse(raw) as { themes: ThemeOption[] };
+  return parsed.themes;
+}
+
 export async function runStrategistAgent(
   state: AgentState,
   emit: (msg: string) => void
@@ -49,10 +73,17 @@ export async function runStrategistAgent(
   emit("Strategist: analyzing idea and building brand identity...");
 
   // Step 1: Generate Brand Identity + Sitemap
+  // If the user supplied their own theme, the brand must follow it exactly.
+  // Otherwise the theme was already chosen by the user from generated options
+  // (see generateThemeOptions) and is passed through in state.theme.
+  const themeInstruction = state.theme
+    ? `The user has chosen this theme — follow it precisely for tone, mood, and colors: "${state.theme}"`
+    : `No theme was specified — choose a tone and palette that best fits the idea.`;
+
   const strategyRaw = await chatJson([
     {
       role: "system",
-      content: `You are a product strategist. Given a raw idea, return a JSON object with:
+      content: `You are a product strategist. Given a raw idea and a theme, return a JSON object with:
 - brandIdentity: { name, tagline, colors: {primary, secondary, accent}, fonts: {heading, body}, tone, targetAudience }
   IMPORTANT: tone and targetAudience must be plain strings, not objects or arrays.
 - sitemap: array of { slug, title, sections: string[] } (4-6 pages)
@@ -60,7 +91,7 @@ Return only valid JSON.`,
     },
     {
       role: "user",
-      content: `Raw idea: "${state.rawIdea}"`,
+      content: `Raw idea: "${state.rawIdea}"\n${themeInstruction}`,
     },
   ]);
 

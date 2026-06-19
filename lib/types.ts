@@ -17,10 +17,18 @@ export interface SitemapPage {
   sections: string[];
 }
 
+export interface ThemeOption {
+  name: string;
+  description: string;
+  mood: string;
+  colors: { primary: string; secondary: string; accent: string };
+}
+
 export interface AgentState {
   // Input
   rawIdea: string;
   sessionId: string;
+  theme?: string;
 
   // Phase 1: Strategy
   brandIdentity?: BrandIdentity;

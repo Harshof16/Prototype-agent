@@ -9,9 +9,10 @@ import { runProducerAgent } from "./agents/producer";
 import { runStitcherAgent } from "./agents/stitcher";
 import { randomUUID } from "crypto";
 
-export function createInitialState(rawIdea: string): AgentState {
+export function createInitialState(rawIdea: string, theme?: string): AgentState {
   return {
     rawIdea,
+    theme,
     sessionId: randomUUID(),
     codeFixAttempts: 0,
     phases: {
@@ -24,8 +25,8 @@ export function createInitialState(rawIdea: string): AgentState {
   };
 }
 
-export async function* runPipeline(rawIdea: string, tier: string = "FREE"): AsyncGenerator<StreamEvent> {
-  let state = createInitialState(rawIdea);
+export async function* runPipeline(rawIdea: string, tier: string = "FREE", theme?: string): AsyncGenerator<StreamEvent> {
+  let state = createInitialState(rawIdea, theme);
 
   function emit(message: string): void {
     state.logs.push(message);

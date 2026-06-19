@@ -49,6 +49,49 @@ Requirements:
 - Use brand colors as inline Tailwind arbitrary values: primary=${brandIdentity?.colors.primary}, secondary=${brandIdentity?.colors.secondary}
 - Mobile-responsive layout
 - Clean, modern design
+
+Fonts:
+- IGNORE brandIdentity.fonts. Use only Tailwind's standard, web-safe font stack (\`font-sans\`, the default UI font stack) for every element. Do not reference, import, or @font-face any custom/brand fonts.
+
+Images — use ONLY real photographs, never illustrations, icons-as-images, or AI-generated-looking images:
+- Use these real Pexels stock photo URLs as <img> src values (pick the ones that best fit each section's content/category — business & team, technology, lifestyle, food, nature/abstract, mobile/finance — mix sections so the page doesn't repeat the same photo twice):
+  https://images.pexels.com/photos/3184291/pexels-photo-3184291.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184292/pexels-photo-3184292.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184339/pexels-photo-3184339.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3182812/pexels-photo-3182812.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3182773/pexels-photo-3182773.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3194519/pexels-photo-3194519.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184398/pexels-photo-3184398.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184433/pexels-photo-3184433.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184325/pexels-photo-3184325.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3184360/pexels-photo-3184360.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1181244/pexels-photo-1181244.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3861969/pexels-photo-3861969.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3585047/pexels-photo-3585047.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/374074/pexels-photo-374074.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3760067/pexels-photo-3760067.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3760323/pexels-photo-3760323.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3850512/pexels-photo-3850512.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1595385/pexels-photo-1595385.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3756766/pexels-photo-3756766.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3756879/pexels-photo-3756879.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1639729/pexels-photo-1639729.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1051838/pexels-photo-1051838.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/2566581/pexels-photo-2566581.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3936421/pexels-photo-3936421.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/2102587/pexels-photo-2102587.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3771089/pexels-photo-3771089.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3771810/pexels-photo-3771810.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/1640772/pexels-photo-1640772.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/3760069/pexels-photo-3760069.jpeg?auto=compress&cs=tinysrgb&w=1260
+  https://images.pexels.com/photos/4474035/pexels-photo-4474035.jpeg?auto=compress&cs=tinysrgb&w=1260
+- Include a hero image and at least one photo per major section.
+- Add ONE image slider/carousel section (e.g. a "Gallery" or "In Action" section) showing 4-6 of the photos above, one at a time, with:
+  - Auto-advance every ~4 seconds via \`useEffect\` + \`setInterval\` (clean up the interval on unmount)
+  - Manual prev/next buttons that update the same React state
+  - Small dot indicators showing the active slide, clickable to jump to that slide
+  - Smooth CSS transition (opacity or transform) between slides — implement with Tailwind classes only, no external carousel library
 - Return ONLY the TypeScript code, no explanation, no markdown fences.${errorContext}`;
 
   const result = await withGeminiRetry(() => model.generateContent(prompt));
