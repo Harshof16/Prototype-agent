@@ -29,6 +29,7 @@ export interface AgentState {
   rawIdea: string;
   sessionId: string;
   theme?: string;
+  logoDataUrl?: string;
 
   // Phase 1: Strategy
   brandIdentity?: BrandIdentity;
@@ -36,6 +37,7 @@ export interface AgentState {
   productDoc?: string;
 
   // Phase 2: Website
+  competitorInsights?: string;
   websiteCode?: string;
   websiteUrl?: string;
   codeError?: string;

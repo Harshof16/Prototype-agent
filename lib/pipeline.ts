@@ -7,12 +7,14 @@ import { runStrategistAgent } from "./agents/strategist";
 import { runBuilderAgent } from "./agents/builder";
 import { runProducerAgent } from "./agents/producer";
 import { runStitcherAgent } from "./agents/stitcher";
+import { analyzeCompetitors, formatCompetitorContext } from "./agents/competitor-analyzer";
 import { randomUUID } from "crypto";
 
-export function createInitialState(rawIdea: string, theme?: string): AgentState {
+export function createInitialState(rawIdea: string, theme?: string, logoDataUrl?: string): AgentState {
   return {
     rawIdea,
     theme,
+    logoDataUrl,
     sessionId: randomUUID(),
     codeFixAttempts: 0,
     phases: {
@@ -25,8 +27,8 @@ export function createInitialState(rawIdea: string, theme?: string): AgentState 
   };
 }
 
-export async function* runPipeline(rawIdea: string, tier: string = "FREE", theme?: string): AsyncGenerator<StreamEvent> {
-  let state = createInitialState(rawIdea, theme);
+export async function* runPipeline(rawIdea: string, tier: string = "FREE", theme?: string, logoDataUrl?: string): AsyncGenerator<StreamEvent> {
+  let state = createInitialState(rawIdea, theme, logoDataUrl);
 
   function emit(message: string): void {
     state.logs.push(message);
@@ -74,6 +76,13 @@ export async function* runPipeline(rawIdea: string, tier: string = "FREE", theme
 
   let websiteFailed = false;
   try {
+    // Analyze competitor URLs embedded in the idea before building
+    const competitorAnalyses = await analyzeCompetitors(state.rawIdea, log);
+    yield* flushQueue();
+    if (competitorAnalyses.length > 0) {
+      state = { ...state, competitorInsights: formatCompetitorContext(competitorAnalyses) };
+    }
+
     const builderUpdate = await runBuilderAgent(state, log);
     state = { ...state, ...builderUpdate };
     yield* flushQueue();

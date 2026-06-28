@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const { idea, theme } = await req.json();
+  const { idea, theme, logo } = await req.json();
 
   if (!idea || typeof idea !== "string" || idea.trim().length < 5) {
     return new Response(JSON.stringify({ error: "Idea must be at least 5 characters." }), {
@@ -68,7 +68,8 @@ export async function POST(req: NextRequest) {
 
       try {
         const trimmedTheme = typeof theme === "string" && theme.trim().length > 0 ? theme.trim() : undefined;
-        for await (const event of runPipeline(idea.trim(), sub.tier, trimmedTheme)) {
+        const logoDataUrl = typeof logo === "string" && logo.startsWith("data:") ? logo : undefined;
+        for await (const event of runPipeline(idea.trim(), sub.tier, trimmedTheme, logoDataUrl)) {
           const chunk = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(chunk));
 

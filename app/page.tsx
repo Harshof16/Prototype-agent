@@ -417,9 +417,30 @@ function buildPreviewHtml(code: string): string {
 </html>`;
 }
 
-function WebsitePreview({ code }: { code: string }) {
-  const [tab, setTab] = useState<"preview" | "code">("preview");
+function WebsitePreview({
+  code,
+  onIterate,
+  iterating,
+  iterationHistory,
+  onRevertToOriginal,
+  onRevertToIteration,
+  canRevert,
+}: {
+  code: string;
+  onIterate: (description: string) => Promise<void>;
+  iterating: boolean;
+  iterationHistory: { description: string }[];
+  onRevertToOriginal: () => void;
+  onRevertToIteration: (index: number) => void;
+  canRevert: boolean;
+}) {
+  const [tab, setTab] = useState<"preview" | "code" | "edit">("preview");
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [iterateInput, setIterateInput] = useState("");
+  const [iterateError, setIterateError] = useState<string | undefined>();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const html = buildPreviewHtml(code);
@@ -431,8 +452,52 @@ function WebsitePreview({ code }: { code: string }) {
     };
   }, [code]);
 
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(document.fullscreenElement === iframeRef.current);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  // Auto-focus textarea when switching to edit tab
+  useEffect(() => {
+    if (tab === "edit") editTextareaRef.current?.focus();
+  }, [tab]);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      iframeRef.current?.requestFullscreen();
+    }
+  }
+
+  async function handleApply() {
+    const trimmed = iterateInput.trim();
+    if (!trimmed || iterating) return;
+    setIterateError(undefined);
+    try {
+      await onIterate(trimmed);
+      setIterateInput("");
+    } catch (e: unknown) {
+      setIterateError((e as Error).message);
+    }
+  }
+
+  const tabBtn = (t: "preview" | "code" | "edit") => {
+    const isActive = tab === t;
+    if (t === "edit") {
+      return `px-2.5 py-1 rounded transition-colors text-[10px] ${isActive ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-zinc-500 hover:text-zinc-300 border border-transparent"}`;
+    }
+    return `px-2.5 py-1 rounded transition-colors text-[10px] ${isActive ? "bg-white/10 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`;
+  };
+
+  const versionLabel = iterationHistory.length > 0
+    ? <span className="text-amber-400/60 ml-1">· v{iterationHistory.length + 1}</span>
+    : null;
+
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden backdrop-blur-sm">
+      {/* Header bar */}
       <div className="bg-black/40 px-4 py-2.5 flex items-center justify-between border-b border-white/10">
         <div className="flex items-center gap-2">
           <div className="flex gap-1.5">
@@ -440,29 +505,139 @@ function WebsitePreview({ code }: { code: string }) {
             <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
             <span className="w-3 h-3 rounded-full bg-green-500/80" />
           </div>
-          <span className="text-zinc-500 text-xs font-mono ml-1">Generated Website</span>
+          <span className="text-zinc-500 text-xs font-mono ml-1">Generated Website{versionLabel}</span>
         </div>
-        <div className="flex gap-1 text-[10px]">
+        <div className="flex gap-1">
+          <button onClick={() => setTab("preview")} className={tabBtn("preview")}>Preview</button>
+          <button onClick={() => setTab("code")} className={tabBtn("code")}>Code</button>
+          <button onClick={() => setTab("edit")} className={tabBtn("edit")}>✦ Edit</button>
           <button
-            onClick={() => setTab("preview")}
-            className={`px-2.5 py-1 rounded transition-colors ${tab === "preview" ? "bg-white/10 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+            onClick={toggleFullscreen}
+            disabled={!blobUrl}
+            title={isFullscreen ? "Exit fullscreen" : "View fullscreen"}
+            className="px-2.5 py-1 rounded transition-colors text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
           >
-            Preview
-          </button>
-          <button
-            onClick={() => setTab("code")}
-            className={`px-2.5 py-1 rounded transition-colors ${tab === "code" ? "bg-white/10 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
-          >
-            Code
+            ⛶ Fullscreen
           </button>
         </div>
       </div>
-      {tab === "preview" ? (
+
+      {/* Content area */}
+      {tab === "edit" ? (
+        /* Split layout: preview on left, iteration panel on right */
+        <div className="flex h-[680px]">
+          {/* Live preview pane */}
+          <div className="flex-1 border-r border-white/10 min-w-0">
+            {blobUrl ? (
+              <iframe
+                ref={iframeRef}
+                src={blobUrl}
+                className="w-full h-full bg-white"
+                sandbox="allow-scripts"
+                title="Live preview"
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-zinc-400 text-sm bg-white/2">
+                Loading preview…
+              </div>
+            )}
+          </div>
+
+          {/* Iteration panel */}
+          <div className="w-[300px] shrink-0 flex flex-col bg-black/30 overflow-y-auto">
+            {/* Input section */}
+            <div className="p-4 border-b border-white/8">
+              <p className="text-[10px] font-mono text-amber-400/80 uppercase tracking-widest mb-3">Tweak Website</p>
+              <textarea
+                ref={editTextareaRef}
+                value={iterateInput}
+                onChange={(e) => setIterateInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !iterating) {
+                    e.preventDefault();
+                    handleApply();
+                  }
+                }}
+                placeholder={"Describe your change…\n\nE.g. \"Make the hero darker\"\n\"Change CTA color to green\"\n\"Add a pricing section\""}
+                rows={5}
+                disabled={iterating}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-xs text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-amber-500/40 transition-colors disabled:opacity-60"
+              />
+              {iterateError && (
+                <p className="text-red-400 text-[10px] mt-1.5 leading-relaxed">{iterateError}</p>
+              )}
+              <button
+                onClick={handleApply}
+                disabled={!iterateInput.trim() || iterating}
+                className="mt-2.5 w-full py-2 rounded-lg bg-amber-500/15 border border-amber-500/25 text-amber-300 text-xs font-medium hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+              >
+                {iterating ? (
+                  <>
+                    <span className="inline-block animate-spin">⟳</span>
+                    Applying changes…
+                  </>
+                ) : (
+                  "Apply changes"
+                )}
+              </button>
+              <p className="text-[10px] text-zinc-600 mt-1.5 text-center">Enter to apply · Shift+Enter for newline</p>
+            </div>
+
+            {/* History */}
+            {(canRevert || iterationHistory.length > 0) && (
+              <div className="p-4 flex-1">
+                <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mb-2.5">Version History</p>
+                <div className="space-y-1">
+                  <button
+                    onClick={onRevertToOriginal}
+                    disabled={!canRevert || iterating}
+                    className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg text-[10px] text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed group"
+                  >
+                    <span className="text-zinc-600 group-hover:text-zinc-300 transition-colors">↩</span>
+                    <span className="flex-1">Original version</span>
+                  </button>
+                  {iterationHistory.map((entry, i) => {
+                    const isCurrent = i === iterationHistory.length - 1;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => onRevertToIteration(i)}
+                        disabled={isCurrent || iterating}
+                        className={`w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg text-[10px] transition-colors group ${
+                          isCurrent
+                            ? "bg-amber-500/10 border border-amber-500/20 text-amber-200/80 cursor-default"
+                            : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                        }`}
+                      >
+                        <span className={`shrink-0 ${isCurrent ? "text-amber-500/60" : "text-zinc-600 group-hover:text-zinc-300"} transition-colors`}>
+                          #{i + 1}
+                        </span>
+                        <span className="flex-1 truncate">{entry.description}</span>
+                        {isCurrent && <span className="shrink-0 text-amber-500/50">current</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {!canRevert && iterationHistory.length === 0 && (
+              <div className="flex-1 flex items-center justify-center p-6 text-center">
+                <p className="text-[10px] text-zinc-600 leading-relaxed">
+                  Changes you apply will appear in the preview instantly. Each change is saved to the version history.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : tab === "preview" ? (
         blobUrl ? (
           <iframe
+            ref={iframeRef}
             src={blobUrl}
             className="w-full h-[600px] bg-white"
             sandbox="allow-scripts"
+            allowFullScreen
             title="Generated website preview"
           />
         ) : (
@@ -1385,6 +1560,29 @@ function LandingContent({ onIdeaSelect }: { onIdeaSelect: (idea: string) => void
 
 // ── Hero / Input ───────────────────────────────────────────────────────────
 
+const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2 MB
+const LOGO_MAX_PX = 512; // resize to this max dimension before embedding
+
+async function resizeLogoToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { naturalWidth: w, naturalHeight: h } = img;
+      const scale = Math.min(1, LOGO_MAX_PX / Math.max(w, h));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not load image")); };
+    img.src = url;
+  });
+}
+
 interface HeroSectionHandle {
   focusInput: () => void;
 }
@@ -1396,6 +1594,8 @@ const HeroSection = forwardRef<HeroSectionHandle, {
   setTheme: (v: string) => void;
   running: boolean;
   validating: boolean;
+  logoDataUrl: string | undefined;
+  onLogoDataUrl: (url: string | undefined) => void;
   onSubmit: (e: React.FormEvent) => void;
   onValidate: () => void;
 }>(function HeroSection({
@@ -1405,13 +1605,25 @@ const HeroSection = forwardRef<HeroSectionHandle, {
   setTheme,
   running,
   validating,
+  logoDataUrl,
+  onLogoDataUrl,
   onSubmit,
   onValidate,
 }, ref) {
-  const handleVoiceTranscript = (text: string) => {
-    setIdea(text);
-  };
-  const inputRef = useRef<HTMLInputElement>(null);
+  const handleVoiceTranscript = (text: string) => { setIdea(text); };
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [showLogoPanel, setShowLogoPanel] = useState(false);
+  const [logoTab, setLogoTab] = useState<"upload" | "generate">("upload");
+  const [logoError, setLogoError] = useState<string>("");
+  const [generatingLogo, setGeneratingLogo] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const [optimizedIdea, setOptimizedIdea] = useState<string>("");
+  const [optimizing, setOptimizing] = useState(false);
+  const [showOptimized, setShowOptimized] = useState(false);
+  const [optimizeError, setOptimizeError] = useState<string>("");
 
   useImperativeHandle(ref, () => ({
     focusInput() {
@@ -1419,6 +1631,88 @@ const HeroSection = forwardRef<HeroSectionHandle, {
       setTimeout(() => inputRef.current?.focus(), 300);
     },
   }));
+
+  async function handleLogoFile(file: File) {
+    setLogoError("");
+    const allowed = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      setLogoError("Unsupported format. Use PNG, JPG, SVG, or WebP.");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — max is 2 MB.`);
+      return;
+    }
+    try {
+      // SVGs are already small text; raster images get canvas-resized
+      let dataUrl: string;
+      if (file.type === "image/svg+xml") {
+        const text = await file.text();
+        dataUrl = `data:image/svg+xml,${encodeURIComponent(text)}`;
+      } else {
+        dataUrl = await resizeLogoToDataUrl(file);
+      }
+      onLogoDataUrl(dataUrl);
+    } catch {
+      setLogoError("Failed to process image. Try another file.");
+    }
+  }
+
+  async function handleGenerateLogo() {
+    if (!idea.trim() || idea.trim().length < 5) {
+      setLogoError("Enter your startup idea first so we can generate a matching logo.");
+      return;
+    }
+    setLogoError("");
+    setGeneratingLogo(true);
+    try {
+      const res = await fetch("/api/generate-logo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Generation failed");
+      onLogoDataUrl(data.dataUrl);
+    } catch (e: unknown) {
+      setLogoError((e as Error).message);
+    } finally {
+      setGeneratingLogo(false);
+    }
+  }
+
+  async function handleOptimize() {
+    if (!idea.trim() || idea.trim().length < 5) return;
+    setOptimizeError("");
+    setOptimizing(true);
+    setShowOptimized(false);
+    try {
+      const res = await fetch("/api/optimize-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Optimization failed");
+      setOptimizedIdea(data.optimized);
+      setShowOptimized(true);
+    } catch (e: unknown) {
+      setOptimizeError((e as Error).message);
+    } finally {
+      setOptimizing(false);
+    }
+  }
+
+  function acceptOptimized() {
+    setIdea(optimizedIdea);
+    setShowOptimized(false);
+    setOptimizedIdea("");
+  }
+
+  function dismissOptimized() {
+    setShowOptimized(false);
+    setOptimizedIdea("");
+  }
 
   return (
     <section className="relative text-center pt-20 pb-16 px-4">
@@ -1454,57 +1748,95 @@ const HeroSection = forwardRef<HeroSectionHandle, {
       </div>
 
       {/* Input form */}
-      <form onSubmit={onSubmit} className="max-w-2xl mx-auto">
-        <div className="relative flex items-center gap-0 rounded-2xl border border-white/15 bg-white/5 backdrop-blur-md p-1.5 shadow-[0_0_40px_rgba(139,92,246,0.15)] focus-within:border-violet-500/50 focus-within:shadow-[0_0_50px_rgba(139,92,246,0.25)] transition-all duration-300">
-          <input
+      <form onSubmit={onSubmit} className="max-w-3xl mx-auto">
+        <div className="rounded-2xl border border-white/15 bg-white/5 backdrop-blur-md shadow-[0_0_40px_rgba(139,92,246,0.15)] focus-within:border-violet-500/50 focus-within:shadow-[0_0_60px_rgba(139,92,246,0.22)] transition-all duration-300">
+          {/* Textarea */}
+          <textarea
             ref={inputRef}
-            type="text"
+            rows={4}
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
-            placeholder="Describe your startup idea in one sentence…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!running && !validating && idea.trim().length >= 5) onSubmit(e as unknown as React.FormEvent);
+              }
+            }}
+            placeholder={"Describe your startup idea here…\n\nTip: mention competitor URLs (e.g. notion.so, linear.app) for layout inspiration. Press Enter to generate, Shift+Enter for new line."}
             disabled={running || validating}
-            className="flex-1 bg-transparent px-4 py-3 text-zinc-100 placeholder-zinc-600 focus:outline-none text-sm disabled:opacity-50"
+            className="w-full bg-transparent px-5 pt-5 pb-3 text-zinc-100 placeholder-zinc-600 focus:outline-none text-base leading-relaxed resize-none disabled:opacity-50"
           />
-          <div className="flex items-center gap-1.5 shrink-0">
-            <DograhVoiceWidget onTranscript={handleVoiceTranscript} />
-            <button
-              type="button"
-              onClick={onValidate}
-              disabled={running || validating || idea.trim().length < 5}
-              title="Validate your idea before generating"
-              className="px-4 py-3 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 hover:text-white font-medium text-sm transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap"
-            >
-              {validating ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-violet-400 rounded-full animate-spin" />
-                  Validating…
-                </>
-              ) : (
-                <>
-                  <span className="text-violet-400">🔍</span>
-                  Validate
-                </>
-              )}
-            </button>
-            <button
-              type="submit"
-              disabled={running || validating || idea.trim().length < 5}
-              className="relative px-6 py-3 rounded-xl bg-linear-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-700 disabled:text-zinc-500 font-semibold text-sm text-white transition-all duration-200 flex items-center gap-2 whitespace-nowrap shadow-[0_0_20px_rgba(139,92,246,0.4)] disabled:shadow-none"
-            >
-              {running ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-zinc-400 border-t-white rounded-full animate-spin" />
-                  Generating…
-                </>
-              ) : (
-                <>
-                  Generate
-                  <span className="text-violet-300">→</span>
-                </>
-              )}
-            </button>
+
+          {/* Divider + action bar */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-white/8">
+            {/* Left — voice */}
+            <div className="flex items-center gap-2">
+              <DograhVoiceWidget onTranscript={handleVoiceTranscript} />
+              <span className="text-zinc-700 text-xs hidden sm:block">or speak your idea</span>
+            </div>
+
+            {/* Right — action buttons */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleOptimize}
+                disabled={running || validating || optimizing || idea.trim().length < 5}
+                title="Let AI sharpen your idea into a detailed brief"
+                className="px-3.5 py-2 rounded-xl border border-amber-500/25 bg-amber-500/8 hover:bg-amber-500/15 disabled:opacity-40 disabled:cursor-not-allowed text-amber-300 hover:text-amber-200 font-medium text-sm transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap"
+              >
+                {optimizing ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-amber-600 border-t-amber-300 rounded-full animate-spin" />
+                    Optimizing…
+                  </>
+                ) : (
+                  <>
+                    <span>✦</span>
+                    Optimize
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onValidate}
+                disabled={running || validating || idea.trim().length < 5}
+                title="Validate your idea before generating"
+                className="px-3.5 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 hover:text-white font-medium text-sm transition-all duration-200 flex items-center gap-1.5 whitespace-nowrap"
+              >
+                {validating ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-violet-400 rounded-full animate-spin" />
+                    Validating…
+                  </>
+                ) : (
+                  <>
+                    <span className="text-violet-400">🔍</span>
+                    Validate
+                  </>
+                )}
+              </button>
+              <button
+                type="submit"
+                disabled={running || validating || idea.trim().length < 5}
+                className="px-5 py-2 rounded-xl bg-linear-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-700 disabled:text-zinc-500 font-semibold text-sm text-white transition-all duration-200 flex items-center gap-2 whitespace-nowrap shadow-[0_0_20px_rgba(139,92,246,0.4)] disabled:shadow-none"
+              >
+                {running ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-zinc-400 border-t-white rounded-full animate-spin" />
+                    Generating…
+                  </>
+                ) : (
+                  <>
+                    Generate
+                    <span className="text-violet-300">→</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Theme input */}
         <input
           type="text"
           value={theme}
@@ -1513,6 +1845,235 @@ const HeroSection = forwardRef<HeroSectionHandle, {
           disabled={running || validating}
           className="w-full mt-2.5 bg-white/3 border border-white/10 rounded-xl px-4 py-2.5 text-zinc-200 placeholder-zinc-600 text-xs focus:outline-none focus:border-violet-500/50 disabled:opacity-50 transition-colors"
         />
+
+        {/* Optimize error */}
+        {optimizeError && (
+          <p className="mt-2 text-[11px] text-red-400 text-center">{optimizeError}</p>
+        )}
+
+        {/* Optimized prompt comparison panel */}
+        {showOptimized && optimizedIdea && (
+          <div className="mt-3 rounded-2xl border border-amber-500/25 bg-amber-950/10 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-amber-500/15 bg-amber-950/20">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-400 text-sm">✦</span>
+                <span className="text-xs font-semibold text-amber-300 uppercase tracking-wider">AI-Optimized Prompt</span>
+              </div>
+              <button
+                type="button"
+                onClick={dismissOptimized}
+                className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {/* Original */}
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-zinc-600 mb-1.5">Original</p>
+                <p className="text-xs text-zinc-500 leading-relaxed bg-white/3 rounded-xl px-3 py-2.5 border border-white/6">{idea}</p>
+              </div>
+
+              {/* Optimized */}
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-amber-600 mb-1.5">Optimized</p>
+                <p className="text-xs text-zinc-200 leading-relaxed bg-amber-950/20 rounded-xl px-3 py-2.5 border border-amber-500/20">{optimizedIdea}</p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={acceptOptimized}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5"
+                >
+                  <span>✦</span> Use optimized prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissOptimized}
+                  className="px-4 py-2.5 rounded-xl border border-white/10 text-zinc-500 hover:text-zinc-300 text-xs font-medium transition-colors"
+                >
+                  Keep original
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Logo toggle row */}
+        <div className="mt-2.5 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => { setShowLogoPanel((v) => !v); setLogoError(""); }}
+            disabled={running || validating}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
+          >
+            <span className={`transition-transform duration-200 ${showLogoPanel ? "rotate-90" : ""}`}>▶</span>
+            {logoDataUrl ? (
+              <span className="flex items-center gap-1.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={logoDataUrl} alt="Logo preview" width={18} height={18} className="rounded object-contain" />
+                <span className="text-violet-300">Logo added</span>
+                <span className="text-zinc-600">· click to change</span>
+              </span>
+            ) : (
+              "Add your logo (optional)"
+            )}
+          </button>
+          {logoDataUrl && (
+            <button
+              type="button"
+              onClick={() => { onLogoDataUrl(undefined); setLogoError(""); }}
+              disabled={running || validating}
+              className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+
+        {/* Logo panel */}
+        {showLogoPanel && (
+          <div className="mt-2 rounded-xl border border-white/10 bg-white/3 overflow-hidden">
+            {/* Tabs */}
+            <div className="flex border-b border-white/8">
+              {(["upload", "generate"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => { setLogoTab(tab); setLogoError(""); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
+                    logoTab === tab
+                      ? "text-violet-300 border-b-2 border-violet-500 bg-violet-950/20"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {tab === "upload" ? "⬆ Upload Your Logo" : "✦ AI Generate Logo"}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4">
+              {logoTab === "upload" ? (
+                <div>
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleLogoFile(file);
+                      e.target.value = "";
+                    }}
+                  />
+
+                  {logoDataUrl ? (
+                    /* Preview */
+                    <div className="flex items-center gap-4">
+                      <div className="w-20 h-20 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center overflow-hidden shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={logoDataUrl} alt="Logo" width={72} height={72} className="object-contain max-w-full max-h-full" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-zinc-300 font-medium mb-1">Logo ready</p>
+                        <p className="text-[11px] text-zinc-600 mb-3">It will appear in the nav bar of your generated website.</p>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-white/15 text-zinc-300 hover:text-white hover:border-violet-500/50 transition-colors"
+                        >
+                          Replace logo
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Dropzone */
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                      onDragLeave={() => setIsDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
+                        const file = e.dataTransfer.files[0];
+                        if (file) handleLogoFile(file);
+                      }}
+                      className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-all duration-200 ${
+                        isDragOver
+                          ? "border-violet-500/70 bg-violet-950/20"
+                          : "border-white/15 hover:border-violet-500/40 hover:bg-white/3"
+                      }`}
+                    >
+                      <p className="text-2xl mb-2">🖼</p>
+                      <p className="text-xs text-zinc-300 font-medium mb-1">Click or drag & drop your logo</p>
+                      <p className="text-[11px] text-zinc-600">PNG · JPG · SVG · WebP · Max 2 MB</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Generate tab */
+                <div>
+                  {logoDataUrl ? (
+                    <div className="flex items-center gap-4">
+                      <div className="w-20 h-20 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center overflow-hidden shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={logoDataUrl} alt="Generated logo" width={72} height={72} className="object-contain max-w-full max-h-full" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-zinc-300 font-medium mb-1">AI logo generated</p>
+                        <p className="text-[11px] text-zinc-600 mb-3">It will appear in the nav bar of your generated website.</p>
+                        <button
+                          type="button"
+                          onClick={handleGenerateLogo}
+                          disabled={generatingLogo}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-950/30 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {generatingLogo && <span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />}
+                          Regenerate
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-2">
+                      <p className="text-xs text-zinc-400 mb-4">
+                        We&apos;ll create a minimal SVG logo that matches your startup idea and brand colors.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleGenerateLogo}
+                        disabled={generatingLogo || idea.trim().length < 5}
+                        className="px-5 py-2.5 rounded-xl bg-violet-600/80 hover:bg-violet-500/80 disabled:bg-zinc-700/50 disabled:text-zinc-500 text-white text-xs font-semibold transition-colors flex items-center gap-2 mx-auto"
+                      >
+                        {generatingLogo ? (
+                          <>
+                            <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            Generating logo…
+                          </>
+                        ) : (
+                          <>✦ Generate Logo with AI</>
+                        )}
+                      </button>
+                      {idea.trim().length < 5 && (
+                        <p className="text-[11px] text-zinc-600 mt-2">Enter your idea above first.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {logoError && (
+                <p className="mt-3 text-[11px] text-red-400 text-center">{logoError}</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="text-zinc-600 text-xs mt-3">
           Takes ~2 minutes · From $9/mo · Powered by Gemini & Magic Hour
         </p>
@@ -1532,6 +2093,7 @@ export default function Home() {
   const router = useRouter();
   const [idea, setIdea] = useState("");
   const [theme, setTheme] = useState("");
+  const [logoDataUrl, setLogoDataUrl] = useState<string | undefined>();
   const [choosingTheme, setChoosingTheme] = useState(false);
   const [themeOptions, setThemeOptions] = useState<ThemeOption[]>([]);
   const [loadingThemes, setLoadingThemes] = useState(false);
@@ -1548,6 +2110,9 @@ export default function Home() {
   const [brand, setBrand] = useState<AgentState["brandIdentity"]>();
   const [productDoc, setProductDoc] = useState<string>();
   const [websiteCode, setWebsiteCode] = useState<string>();
+  const [originalWebsiteCode, setOriginalWebsiteCode] = useState<string | undefined>();
+  const [iterationHistory, setIterationHistory] = useState<{ description: string; code: string }[]>([]);
+  const [iterating, setIterating] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string>();
   const [validating, setValidating] = useState(false);
@@ -1560,6 +2125,49 @@ export default function Home() {
   const scrollLogs = useCallback(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  async function handleIterate(description: string) {
+    if (!websiteCode) return;
+    setIterating(true);
+    try {
+      // Strip logo data URL before sending to avoid wasting tokens
+      let codeToSend = websiteCode;
+      if (logoDataUrl && codeToSend.includes(logoDataUrl)) {
+        codeToSend = codeToSend.replaceAll(logoDataUrl, "__BRAND_LOGO__");
+      }
+      const res = await fetch("/api/iterate-website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentCode: codeToSend, changeRequest: description }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to iterate");
+      let newCode = data.code as string;
+      // Re-inject logo if it was stripped
+      if (logoDataUrl && newCode.includes("__BRAND_LOGO__")) {
+        newCode = newCode.replaceAll("__BRAND_LOGO__", logoDataUrl);
+      }
+      setIterationHistory((prev) => [...prev, { description, code: newCode }]);
+      setWebsiteCode(newCode);
+    } finally {
+      setIterating(false);
+    }
+  }
+
+  function handleRevertToOriginal() {
+    if (originalWebsiteCode) {
+      setWebsiteCode(originalWebsiteCode);
+      setIterationHistory([]);
+    }
+  }
+
+  function handleRevertToIteration(index: number) {
+    const entry = iterationHistory[index];
+    if (entry) {
+      setWebsiteCode(entry.code);
+      setIterationHistory((prev) => prev.slice(0, index + 1));
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1605,6 +2213,9 @@ export default function Home() {
     setBrand(undefined);
     setProductDoc(undefined);
     setWebsiteCode(undefined);
+    setOriginalWebsiteCode(undefined);
+    setIterationHistory([]);
+    setIterating(false);
     activePhaseRef.current = "strategy";
     setPhases({ strategy: "pending", website: "pending", media: "pending", stitching: "pending" });
 
@@ -1612,7 +2223,7 @@ export default function Home() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea, theme: chosenTheme }),
+        body: JSON.stringify({ idea, theme: chosenTheme, logo: logoDataUrl }),
       });
 
       if (res.status === 429) {
@@ -1654,8 +2265,11 @@ export default function Home() {
             setArtifacts((prev) => [...prev, event.artifact!]);
             if (event.artifact.type === "website") {
               const b64 = event.artifact.url.replace("data:text/html;base64,", "");
-              const decoded = atob(b64);
+              // atob() is Latin-1 only — use TextDecoder to properly restore UTF-8 (emoji, etc.)
+              const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+              const decoded = new TextDecoder().decode(bytes);
               setWebsiteCode(decoded);
+              setOriginalWebsiteCode(decoded);
             }
           } else if (event.type === "done") {
             if (event.state?.brandIdentity) setBrand(event.state.brandIdentity);
@@ -1700,6 +2314,8 @@ export default function Home() {
           setTheme={setTheme}
           running={running}
           validating={validating || choosingTheme}
+          logoDataUrl={logoDataUrl}
+          onLogoDataUrl={setLogoDataUrl}
           onSubmit={handleSubmit}
           onValidate={() => {
             if (idea.trim().length < 5 || running || choosingTheme) return;
@@ -1829,7 +2445,17 @@ export default function Home() {
               </div>
             )}
 
-            {websiteCode && <WebsitePreview code={websiteCode} />}
+            {websiteCode && (
+              <WebsitePreview
+                code={websiteCode}
+                onIterate={handleIterate}
+                iterating={iterating}
+                iterationHistory={iterationHistory}
+                onRevertToOriginal={handleRevertToOriginal}
+                onRevertToIteration={handleRevertToIteration}
+                canRevert={iterationHistory.length > 0}
+              />
+            )}
 
             {error && (
               <div className="mt-5 rounded-xl border border-red-500/30 bg-red-950/30 backdrop-blur-sm px-5 py-4 text-red-300 text-sm flex items-start gap-3">
